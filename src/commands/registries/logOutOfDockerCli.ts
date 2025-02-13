@@ -3,18 +3,31 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IActionContext } from 'vscode-azureextensionui';
+import { IActionContext } from '@microsoft/vscode-azext-utils';
+import { CommonRegistry } from '@microsoft/vscode-docker-registries';
+import { l10n } from 'vscode';
 import { ext } from '../../extensionVariables';
-import { registryExpectedContextValues } from '../../tree/registries/registryContextValues';
-import { RegistryTreeItemBase } from '../../tree/registries/RegistryTreeItemBase';
-import { dockerExePath } from '../../utils/dockerExePathProvider';
-import { executeAsTask } from '../../utils/executeAsTask';
+import { TaskCommandRunnerFactory } from '../../runtimes/runners/TaskCommandRunnerFactory';
+import { UnifiedRegistryItem } from '../../tree/registries/UnifiedRegistryTreeDataProvider';
+import { registryExperience } from '../../utils/registryExperience';
 
-export async function logOutOfDockerCli(context: IActionContext, node?: RegistryTreeItemBase): Promise<void> {
+export async function logOutOfDockerCli(context: IActionContext, node?: UnifiedRegistryItem<CommonRegistry>): Promise<void> {
     if (!node) {
-        node = await ext.registriesTree.showTreeItemPicker<RegistryTreeItemBase>(registryExpectedContextValues.all.registry, context);
+        node = await registryExperience<CommonRegistry>(context, { contextValueFilter: { include: /commonregistry/i } });
+    }
+    const serverUrl = (await node.provider.getLoginInformation?.(node.wrappedItem))?.server;
+    if (!serverUrl) {
+        throw new Error(l10n.t('Unable to get server URL'));
     }
 
-    const creds = await node.getDockerCliCredentials();
-    await executeAsTask(context, `${dockerExePath(context)} logout ${creds.registryPath}`, 'Docker', { addDockerEnv: true });
+    const client = await ext.runtimeManager.getClient();
+    const taskCRF = new TaskCommandRunnerFactory(
+        {
+            taskName: 'Docker'
+        }
+    );
+
+    await taskCRF.getCommandRunner()(
+        client.logout({ registry: serverUrl }),
+    );
 }

@@ -3,12 +3,13 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { CancellationToken, ConfigurationTarget, ExtensionContext, QuickPickItem, Task, tasks, workspace, WorkspaceFolder } from 'vscode';
-import { IActionContext, UserCancelledError } from 'vscode-azureextensionui';
+import { IActionContext, UserCancelledError } from '@microsoft/vscode-azext-utils';
+import { ContainerPlatform } from '@microsoft/vscode-container-client';
+import * as path from 'path';
+import { CancellationToken, ConfigurationTarget, ExtensionContext, QuickPickItem, Task, WorkspaceFolder, l10n, tasks, workspace } from 'vscode';
 import { DebugConfigurationBase } from '../debugging/DockerDebugConfigurationBase';
 import { DockerDebugConfiguration } from '../debugging/DockerDebugConfigurationProvider';
-import { DockerPlatform } from '../debugging/DockerPlatformHelper';
-import { localize } from '../localize';
+import { DockerPlatform } from '../debugging/DockerDebugPlatformHelper';
 import { getValidImageName, getValidImageNameWithTag } from '../utils/getValidImageName';
 import { pathNormalize } from '../utils/pathNormalize';
 import { resolveVariables } from '../utils/resolveVariables';
@@ -18,12 +19,13 @@ import { DockerComposeTaskProvider } from './DockerComposeTaskProvider';
 import { DockerPseudoterminal } from './DockerPseudoterminal';
 import { DockerContainerVolume, DockerRunOptions, DockerRunTaskDefinitionBase } from './DockerRunTaskDefinitionBase';
 import { DockerRunTask, DockerRunTaskDefinition, DockerRunTaskProvider } from './DockerRunTaskProvider';
+import { TaskDefinitionBase } from './TaskDefinitionBase';
+import { NetSdkRunTaskProvider } from './netSdk/NetSdkRunTaskProvider';
 import { netCoreTaskHelper } from './netcore/NetCoreTaskHelper';
 import { nodeTaskHelper } from './node/NodeTaskHelper';
 import { pythonTaskHelper } from './python/PythonTaskHelper';
-import { TaskDefinitionBase } from './TaskDefinitionBase';
 
-export type DockerTaskProviderName = 'docker-build' | 'docker-run' | 'docker-compose';
+export type DockerTaskProviderName = 'docker-build' | 'docker-run' | 'docker-compose' | 'dotnet-container-sdk';
 
 export interface DockerTaskContext {
     folder: WorkspaceFolder;
@@ -76,7 +78,8 @@ export function registerTaskProviders(ctx: ExtensionContext): void {
     const helpers = {
         netCore: netCoreTaskHelper,
         node: nodeTaskHelper,
-        python: pythonTaskHelper
+        python: pythonTaskHelper,
+        netSdk: undefined
     };
 
     ctx.subscriptions.push(
@@ -99,17 +102,24 @@ export function registerTaskProviders(ctx: ExtensionContext): void {
             new DockerComposeTaskProvider()
         )
     );
+
+    ctx.subscriptions.push(
+        tasks.registerTaskProvider(
+            'dotnet-container-sdk',
+            new NetSdkRunTaskProvider()
+        )
+    );
 }
 
 export function hasTask(taskLabel: string, folder: WorkspaceFolder): boolean {
-    const workspaceTasks = workspace.getConfiguration('tasks', folder.uri);
+    const workspaceTasks = workspace.getConfiguration('tasks', folder);
     const allTasks = workspaceTasks && workspaceTasks.tasks as TaskDefinitionBase[] || [];
     return allTasks.findIndex(t => t.label === taskLabel) > -1;
 }
 
 export async function addTask(newTask: DockerBuildTaskDefinition | DockerRunTaskDefinition, folder: WorkspaceFolder, overwrite?: boolean): Promise<boolean> {
     // Using config API instead of tasks API means no wasted perf on re-resolving the tasks, and avoids confusion on resolved type !== true type
-    const workspaceTasks = workspace.getConfiguration('tasks', folder.uri);
+    const workspaceTasks = workspace.getConfiguration('tasks', folder);
     const allTasks = workspaceTasks && workspaceTasks.tasks as TaskDefinitionBase[] || [];
 
     const existingTaskIndex = allTasks.findIndex(t => t.label === newTask.label);
@@ -130,17 +140,17 @@ export async function addTask(newTask: DockerBuildTaskDefinition | DockerRunTask
     return true;
 }
 
-export async function getAssociatedDockerRunTask(debugConfiguration: DockerDebugConfiguration): Promise<DockerRunTaskDefinition | undefined> {
+export async function getAssociatedDockerRunTask(debugConfiguration: DockerDebugConfiguration, folder: WorkspaceFolder): Promise<DockerRunTaskDefinition | undefined> {
     // Using config API instead of tasks API means no wasted perf on re-resolving the tasks (not just our tasks), and avoids confusion on resolved type !== true type
-    const workspaceTasks = workspace.getConfiguration('tasks');
+    const workspaceTasks = workspace.getConfiguration('tasks', folder);
     const allTasks: TaskDefinitionBase[] = workspaceTasks && workspaceTasks.tasks as TaskDefinitionBase[] || [];
 
     return await recursiveFindTaskByType(allTasks, 'docker-run', debugConfiguration) as DockerRunTaskDefinition;
 }
 
-export async function getAssociatedDockerBuildTask(runTask: DockerRunTask): Promise<DockerBuildTaskDefinition | undefined> {
+export async function getAssociatedDockerBuildTask(runTask: DockerRunTask, folder: WorkspaceFolder): Promise<DockerBuildTaskDefinition | undefined> {
     // Using config API instead of tasks API means no wasted perf on re-resolving the tasks (not just our tasks), and avoids confusion on resolved type !== true type
-    const workspaceTasks = workspace.getConfiguration('tasks');
+    const workspaceTasks = workspace.getConfiguration('tasks', folder);
     const allTasks: TaskDefinitionBase[] = workspaceTasks && workspaceTasks.tasks as TaskDefinitionBase[] || [];
 
     // Due to inconsistencies in the Task API, runTask does not have its dependsOn, so we need to re-find it by label
@@ -156,8 +166,15 @@ export async function getOfficialBuildTaskForDockerfile(context: IActionContext,
     let buildTasks: DockerBuildTask[] = await tasks.fetchTasks({ type: 'docker-build' }) || [];
     buildTasks =
         buildTasks.filter(buildTask => {
-            return pathNormalize(resolveVariables(buildTask.definition?.dockerBuild?.dockerfile ?? '', folder)) === resolvedDockerfile &&
-                buildTask.scope === folder;
+            const taskDockerfile = pathNormalize(resolveVariables(buildTask.definition?.dockerBuild?.dockerfile ?? 'Dockerfile', folder));
+            const taskContext = pathNormalize(resolveVariables(buildTask.definition?.dockerBuild?.context ?? '', folder));
+
+            if (taskDockerfile && taskContext) {
+                const taskDockerfileAbsPath = path.resolve(taskContext, taskDockerfile);
+                return taskDockerfileAbsPath === resolvedDockerfile && buildTask.scope === folder;
+            }
+
+            return false;
         });
 
     if (buildTasks.length === 1) {
@@ -173,7 +190,7 @@ export async function getOfficialBuildTaskForDockerfile(context: IActionContext,
             return { label: t.name };
         });
 
-        const item = await context.ui.showQuickPick(items, { placeHolder: localize('vscode-docker.tasks.helper.chooseBuildDefinition', 'Choose the Docker Build definition.') });
+        const item = await context.ui.showQuickPick(items, { placeHolder: l10n.t('Choose the Docker Build definition.') });
         return buildTasks.find(t => t.name === item.label);
     }
 
@@ -245,4 +262,27 @@ async function findTaskByLabel(allTasks: TaskDefinitionBase[], label: string): P
 
 async function findTaskByType(allTasks: TaskDefinitionBase[], type: string): Promise<TaskDefinitionBase | undefined> {
     return allTasks.find(t => t.type === type);
+}
+
+/**
+ * Normalizes a platform string or object to a standardized `ContainerPlatform` object.
+ *
+ * @param platform The platform string or object to normalize.
+ * @returns A standardized `ContainerPlatform` object.
+ * @throws An error if the platform string is malformed.
+ */
+export function normalizePlatform(platform: string | ContainerPlatform): ContainerPlatform | undefined {
+
+    if (platform && typeof platform === 'string') {
+        const [os, ...architectureParts] = platform.split('/');
+        const architecture = architectureParts.join('/');
+
+        if (!os || !architecture) {
+            throw new Error('Platform string is malformed. It should be in the format "{os}/{architecture}".');
+        }
+
+        return { os, architecture };
+    }
+
+    return platform as ContainerPlatform || undefined;
 }

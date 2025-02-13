@@ -3,16 +3,15 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { CancellationToken, CustomExecution, ProviderResult, Task, TaskDefinition, TaskProvider } from 'vscode';
-import { callWithTelemetryAndErrorHandling, IActionContext, parseError } from 'vscode-azureextensionui';
-import { DockerOrchestration } from '../constants';
-import { DockerPlatform, getPlatform } from '../debugging/DockerPlatformHelper';
+import { callWithTelemetryAndErrorHandling, IActionContext, parseError } from '@microsoft/vscode-azext-utils';
+import { CancellationToken, CustomExecution, l10n, ProviderResult, Task, TaskDefinition, TaskProvider } from 'vscode';
+import { DockerPlatform } from '../debugging/DockerDebugPlatformHelper';
 import { ext } from '../extensionVariables';
-import { localize } from '../localize';
-import { ExecError } from '../utils/spawnAsync';
+import { ExecError } from '../utils/execAsync';
 import { DockerBuildTask } from './DockerBuildTaskProvider';
 import { DockerPseudoterminal } from './DockerPseudoterminal';
 import { DockerRunTask } from './DockerRunTaskProvider';
+import { getTaskPlatform } from './DockerTaskPlatformHelper';
 import { DockerTaskExecutionContext, DockerTaskProviderName, TaskHelper } from './TaskHelper';
 
 export abstract class DockerTaskProvider implements TaskProvider {
@@ -44,14 +43,13 @@ export abstract class DockerTaskProvider implements TaskProvider {
                 ext.activityMeasurementService.recordActivity('overallnoedit');
 
                 if (!context.folder) {
-                    throw new Error(localize('vscode-docker.tasks.provider.noScope', 'Unable to determine task scope to execute {0} task \'{1}\'. Please open a workspace folder.', this.telemetryName, task.name));
+                    throw new Error(l10n.t('Unable to determine task scope to execute {0} task \'{1}\'. Please open a workspace folder.', this.telemetryName, task.name));
                 }
 
                 context.actionContext = actionContext;
-                context.platform = getPlatform(task.definition);
+                context.platform = getTaskPlatform(task.definition);
 
                 context.actionContext.telemetry.properties.dockerPlatform = context.platform;
-                context.actionContext.telemetry.properties.orchestration = 'single' as DockerOrchestration; // TODO: docker-compose, when support is added
                 await this.executeTaskInternal(context, task);
             });
         } catch (err) {

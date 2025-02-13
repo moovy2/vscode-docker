@@ -3,51 +3,44 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import type { WebSiteManagementModels } from '@azure/arm-appservice'; // These are only dev-time imports so don't need to be lazy
-import { env, Uri, window } from "vscode";
-import type { IAppServiceWizardContext } from "vscode-azureappservice"; // These are only dev-time imports so don't need to be lazy
-import { AzureWizard, AzureWizardExecuteStep, AzureWizardPromptStep, IActionContext, ResourceGroupListStep } from "vscode-azureextensionui";
+import type { Site } from '@azure/arm-appservice'; // These are only dev-time imports so don't need to be lazy
+import type { IAppServiceWizardContext } from "@microsoft/vscode-azext-azureappservice"; // These are only dev-time imports so don't need to be lazy
+import { AzureWizard, AzureWizardExecuteStep, AzureWizardPromptStep, IActionContext, createSubscriptionContext, nonNullProp } from "@microsoft/vscode-azext-utils";
+import { CommonTag } from '@microsoft/vscode-docker-registries';
+import { Uri, env, l10n, window } from "vscode";
 import { ext } from "../../../extensionVariables";
-import { localize } from "../../../localize";
-import { RegistryApi } from '../../../tree/registries/all/RegistryApi';
-import { AzureAccountTreeItem } from '../../../tree/registries/azure/AzureAccountTreeItem';
-import { azureRegistryProviderId } from '../../../tree/registries/azure/azureRegistryProvider';
-import { registryExpectedContextValues } from '../../../tree/registries/registryContextValues';
-import { RemoteTagTreeItem } from '../../../tree/registries/RemoteTagTreeItem';
-import { nonNullProp } from "../../../utils/nonNull";
+import { UnifiedRegistryItem } from '../../../tree/registries/UnifiedRegistryTreeDataProvider';
+import { getAzExtAppService, getAzExtAzureUtils } from '../../../utils/lazyPackages';
+import { registryExperience, subscriptionExperience } from '../../../utils/registryExperience';
 import { DockerAssignAcrPullRoleStep } from './DockerAssignAcrPullRoleStep';
 import { DockerSiteCreateStep } from './DockerSiteCreateStep';
 import { DockerWebhookCreateStep } from './DockerWebhookCreateStep';
 import { WebSitesPortPromptStep } from './WebSitesPortPromptStep';
 
-
 export interface IAppServiceContainerWizardContext extends IAppServiceWizardContext {
     webSitesPort?: number;
 }
 
-export async function deployImageToAzure(context: IActionContext, node?: RemoteTagTreeItem): Promise<void> {
+export async function deployImageToAzure(context: IActionContext, node?: UnifiedRegistryItem<CommonTag>): Promise<void> {
     if (!node) {
-        node = await ext.registriesTree.showTreeItemPicker<RemoteTagTreeItem>([registryExpectedContextValues.dockerHub.tag, registryExpectedContextValues.dockerV2.tag], context);
+        node = await registryExperience<CommonTag>(context, { contextValueFilter: { include: 'commontag' } });
     }
 
-    const vscAzureAppService = await import('vscode-azureappservice');
-    vscAzureAppService.registerAppServiceExtensionVariables(ext);
+    const azExtAzureUtils = await getAzExtAzureUtils();
+    const vscAzureAppService = await getAzExtAppService();
+    const promptSteps: AzureWizardPromptStep<IAppServiceWizardContext>[] = [];
 
+    const subscriptionItem = await subscriptionExperience(context);
+    const subscriptionContext = createSubscriptionContext(subscriptionItem.wrappedItem.subscription);
     const wizardContext: IActionContext & Partial<IAppServiceContainerWizardContext> = {
         ...context,
+        ...subscriptionContext,
         newSiteOS: vscAzureAppService.WebsiteOS.linux,
         newSiteKind: vscAzureAppService.AppKind.app
     };
-    const promptSteps: AzureWizardPromptStep<IAppServiceWizardContext>[] = [];
-    // Create a temporary azure account tree item since Azure might not be connected
-    const azureAccountTreeItem = new AzureAccountTreeItem(ext.registriesRoot, { id: azureRegistryProviderId, api: RegistryApi.DockerV2 });
-    const subscriptionStep = await azureAccountTreeItem.getSubscriptionPromptStep(wizardContext);
-    if (subscriptionStep) {
-        promptSteps.push(subscriptionStep);
-    }
 
     promptSteps.push(new vscAzureAppService.SiteNameStep());
-    promptSteps.push(new ResourceGroupListStep());
+    promptSteps.push(new azExtAzureUtils.ResourceGroupListStep());
     vscAzureAppService.CustomLocationListStep.addStep(wizardContext, promptSteps);
     promptSteps.push(new WebSitesPortPromptStep());
     promptSteps.push(new vscAzureAppService.AppServicePlanListStep());
@@ -59,17 +52,17 @@ export async function deployImageToAzure(context: IActionContext, node?: RemoteT
         new DockerWebhookCreateStep(node),
     ];
 
-    const title = localize('vscode-docker.commands.registries.azure.deployImage.title', 'Create new web app');
+    const title = l10n.t('Create new web app');
     const wizard = new AzureWizard(wizardContext, { title, promptSteps, executeSteps });
     await wizard.prompt();
     await wizard.execute();
 
-    const site: WebSiteManagementModels.Site = nonNullProp(wizardContext, 'site');
+    const site: Site = nonNullProp(wizardContext, 'site');
     const siteUri: string = `https://${site.defaultHostName}`;
-    const createdNewWebApp: string = localize('vscode-docker.commands.registries.azure.deployImage.created', 'Successfully created web app "{0}": {1}', site.name, siteUri);
-    ext.outputChannel.appendLine(createdNewWebApp);
+    const createdNewWebApp: string = l10n.t('Successfully created web app "{0}": {1}', site.name, siteUri);
+    ext.outputChannel.info(createdNewWebApp);
 
-    const openSite: string = localize('vscode-docker.commands.registries.azure.deployImage.openSite', 'Open Site');
+    const openSite: string = l10n.t('Open Site');
     // don't wait
     /* eslint-disable-next-line @typescript-eslint/no-floating-promises */
     window.showInformationMessage(createdNewWebApp, ...[openSite]).then((selection) => {

@@ -4,9 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as fse from 'fs-extra';
-import { default as fetch, Request, RequestInit, Response } from 'node-fetch';
 import { URL, URLSearchParams } from 'url';
-import { localize } from '../localize';
+import { l10n } from 'vscode';
 
 export const enum ErrorHandling {
     ThrowOnError,
@@ -87,10 +86,10 @@ export class HttpResponse<T> implements ResponseLike {
 
 export class HttpErrorResponse extends Error {
     public constructor(public readonly response: ResponseLike) {
-        super(localize('vscode-docker.utils.httpRequest', 'Request to {0} failed with status {1}: {2}', response.url, response.status, response.statusText));
+        super(l10n.t('Request to {0} failed with status {1}: {2}', response.url, response.status, response.statusText));
     }
 
-    // This method lets parseError from vscode-azureextensionui get the HTTP status code as the error code
+    // This method lets parseError from @microsoft/vscode-azext-utils get the HTTP status code as the error code
     public get code(): number {
         return this.response.status;
     }
@@ -131,20 +130,34 @@ export interface ResponseLike {
 }
 
 export async function streamToFile(downloadUrl: string, fileName: string): Promise<void> {
-    const response = await fetch(downloadUrl);
-    const writeStream = fse.createWriteStream(fileName);
-    response.body.pipe(writeStream);
+    try {
+        const response = await fetch(downloadUrl);
 
-    return new Promise((resolve, reject) => {
-        writeStream.on('close', () => {
-            resolve();
-        });
+        if (!response.ok) {
+            throw new HttpErrorResponse(response);
+        }
 
-        writeStream.on('error', error => {
-            writeStream.close();
-            reject(error);
-        });
-    });
+        const writeStream = fse.createWriteStream(fileName);
+
+        for await (const chunk of response.body) {
+            writeStream.write(chunk);
+        }
+
+        writeStream.close();
+    } catch (error) {
+        // Sometimes the error has a cause field, sometimes a message, sometimes maybe neither
+        let errorText: string;
+
+        if (typeof error === 'object') {
+            errorText = (error as { cause: string }).cause ?? (error as { message: string }).message ?? error.toString();
+        } else if (typeof error === 'string') {
+            errorText = error;
+        } else {
+            errorText = error.toString();
+        }
+
+        throw new Error(`Failed to download ${downloadUrl}: ${errorText}`);
+    }
 }
 
 export function basicAuthHeader(username: string, password: string): string {

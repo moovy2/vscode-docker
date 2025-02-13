@@ -3,49 +3,50 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import type { WebSiteManagementModels } from '@azure/arm-appservice'; // These are only dev-time imports so don't need to be lazy
-import type { ContainerRegistryManagementModels as AcrModels } from '@azure/arm-containerregistry'; // These are only dev-time imports so don't need to be lazy
+import type { Site } from '@azure/arm-appservice'; // These are only dev-time imports so don't need to be lazy
+import type { Webhook, WebhookCreateParameters } from '@azure/arm-containerregistry'; // These are only dev-time imports so don't need to be lazy
+import type { IAppServiceWizardContext } from "@microsoft/vscode-azext-azureappservice"; // These are only dev-time imports so don't need to be lazy
+import { AzureWizardExecuteStep, nonNullProp } from "@microsoft/vscode-azext-utils";
+import { CommonRepository, CommonTag, isDockerHubRepository } from '@microsoft/vscode-docker-registries';
 import * as vscode from "vscode";
-import type { IAppServiceWizardContext } from "vscode-azureappservice"; // These are only dev-time imports so don't need to be lazy
-import { AzureWizardExecuteStep, createAzureClient } from "vscode-azureextensionui";
 import { ext } from "../../../extensionVariables";
-import { localize } from "../../../localize";
-import { AzureRegistryTreeItem } from '../../../tree/registries/azure/AzureRegistryTreeItem';
-import { AzureRepositoryTreeItem } from '../../../tree/registries/azure/AzureRepositoryTreeItem';
-import { DockerHubRepositoryTreeItem } from '../../../tree/registries/dockerHub/DockerHubRepositoryTreeItem';
-import { RemoteTagTreeItem } from '../../../tree/registries/RemoteTagTreeItem';
+import { AzureRegistry, isAzureRepository } from '../../../tree/registries/Azure/AzureRegistryDataProvider';
+import { UnifiedRegistryItem } from '../../../tree/registries/UnifiedRegistryTreeDataProvider';
+import { getResourceGroupFromAzureRegistryItem } from '../../../tree/registries/registryTreeUtils';
 import { cryptoUtils } from '../../../utils/cryptoUtils';
-import { nonNullProp } from "../../../utils/nonNull";
+import { getArmContainerRegistry, getAzExtAppService, getAzExtAzureUtils } from "../../../utils/lazyPackages";
 
 export class DockerWebhookCreateStep extends AzureWizardExecuteStep<IAppServiceWizardContext> {
     public priority: number = 142; // execute after DockerAssignAcrPullRoleStep
-    private _treeItem: RemoteTagTreeItem;
-    public constructor(treeItem: RemoteTagTreeItem) {
+
+    public constructor(private readonly tagItem: UnifiedRegistryItem<CommonTag>) {
         super();
-        this._treeItem = treeItem;
     }
 
     public async execute(context: IAppServiceWizardContext, progress: vscode.Progress<{
         message?: string;
         increment?: number;
     }>): Promise<void> {
-        const vscAzureAppService = await import('vscode-azureappservice');
+        const vscAzureAppService = await getAzExtAppService();
         vscAzureAppService.registerAppServiceExtensionVariables(ext);
-        const site: WebSiteManagementModels.Site = nonNullProp(context, 'site');
+        const site: Site = nonNullProp(context, 'site');
         const parsedSite = new vscAzureAppService.ParsedSite(site, context);
         const siteClient = await parsedSite.createClient(context);
         const appUri: string = (await siteClient.getWebAppPublishCredential()).scmUri;
-        if (this._treeItem.parent instanceof AzureRepositoryTreeItem) {
-            const creatingNewWebhook: string = localize('vscode-docker.commands.registries.azure.dockerWebhook.creatingWebhook', 'Creating webhook for web app "{0}"...', context.newSiteName);
-            ext.outputChannel.appendLine(creatingNewWebhook);
+
+        if (isAzureRepository(this.tagItem.parent.wrappedItem)) {
+            const creatingNewWebhook: string = vscode.l10n.t('Creating webhook for web app "{0}"...', context.newSiteName);
+            ext.outputChannel.info(creatingNewWebhook);
             progress.report({ message: creatingNewWebhook });
-            const webhook = await this.createWebhookForApp(context, this._treeItem, context.site, appUri);
-            ext.outputChannel.appendLine(localize('vscode-docker.commands.registries.azure.dockerWebhook.createdWebhook', 'Created webhook "{0}" with scope "{1}", id: "{2}" and location: "{3}"', webhook.name, webhook.scope, webhook.id, webhook.location));
-        } else if (this._treeItem.parent instanceof DockerHubRepositoryTreeItem) {
+            const webhook = await this.createWebhookForApp(context, context.site, appUri);
+            ext.outputChannel.info(vscode.l10n.t('Created webhook "{0}" with scope "{1}", id: "{2}" and location: "{3}"', webhook.name, webhook.scope, webhook.id, webhook.location));
+        } else if (isDockerHubRepository(this.tagItem.parent.wrappedItem)) {
+            const registryName = this.tagItem.parent.parent.wrappedItem.label;
+            const repoName = (this.tagItem.parent as unknown as CommonRepository).wrappedItem.label;
             // point to dockerhub to create a webhook
             // http://cloud.docker.com/repository/docker/<registryName>/<repoName>/webHooks
-            const dockerhubPrompt: string = localize('vscode-docker.commands.registries.azure.dockerWebhook.copyAndOpen', 'Copy & Open');
-            const dockerhubUri: string = `https://cloud.docker.com/repository/docker/${this._treeItem.parent.parent.namespace}/${this._treeItem.parent.repoName}/webHooks`;
+            const dockerhubPrompt: string = vscode.l10n.t('Copy & Open');
+            const dockerhubUri: string = `https://cloud.docker.com/repository/docker/${registryName}/${repoName}/webHooks`;
 
             // NOTE: The response to the information message is not awaited but handled independently of the wizard steps.
             //       VS Code will hide such messages in the notifications pane after a period of time; awaiting them risks
@@ -54,7 +55,7 @@ export class DockerWebhookCreateStep extends AzureWizardExecuteStep<IAppServiceW
 
             /* eslint-disable-next-line @typescript-eslint/no-floating-promises */
             vscode.window
-                .showInformationMessage(localize('vscode-docker.commands.registries.azure.dockerWebhook.cicd', 'To set up a CI/CD webhook, open the page "{0}" and enter the URI to the created web app in your dockerhub account', dockerhubUri), dockerhubPrompt)
+                .showInformationMessage(vscode.l10n.t('To set up a CI/CD webhook, open the page "{0}" and enter the URI to the created web app in your dockerhub account', dockerhubUri), dockerhubPrompt)
                 .then(response => {
                     if (response) {
                         void vscode.env.clipboard.writeText(appUri);
@@ -65,10 +66,10 @@ export class DockerWebhookCreateStep extends AzureWizardExecuteStep<IAppServiceW
     }
 
     public shouldExecute(context: IAppServiceWizardContext): boolean {
-        return !!context.site && (this._treeItem.parent instanceof AzureRepositoryTreeItem || this._treeItem.parent instanceof DockerHubRepositoryTreeItem);
+        return !!context.site && (isAzureRepository(this.tagItem.parent.wrappedItem) || isDockerHubRepository(this.tagItem.parent.wrappedItem));
     }
 
-    private async createWebhookForApp(context: IAppServiceWizardContext, node: RemoteTagTreeItem, site: WebSiteManagementModels.Site, appUri: string): Promise<AcrModels.Webhook | undefined> {
+    private async createWebhookForApp(context: IAppServiceWizardContext, site: Site, appUri: string): Promise<Webhook | undefined> {
         const maxLength: number = 50;
         const numRandomChars: number = 6;
 
@@ -81,16 +82,18 @@ export class DockerWebhookCreateStep extends AzureWizardExecuteStep<IAppServiceW
         webhookName += cryptoUtils.getRandomHexString(numRandomChars);
 
         // variables derived from the container registry
-        const registryTreeItem: AzureRegistryTreeItem = (<AzureRepositoryTreeItem>node.parent).parent;
-        const armContainerRegistry = await import('@azure/arm-containerregistry');
-        const crmClient = createAzureClient(context, armContainerRegistry.ContainerRegistryManagementClient);
-        const webhookCreateParameters: AcrModels.WebhookCreateParameters = {
-            location: registryTreeItem.registryLocation,
+        const registryTreeItem: UnifiedRegistryItem<AzureRegistry> = this.tagItem.parent.parent as unknown as UnifiedRegistryItem<AzureRegistry>;
+        const armContainerRegistry = await getArmContainerRegistry();
+        const azExtAzureUtils = await getAzExtAzureUtils();
+        const crmClient = azExtAzureUtils.createAzureClient(context, armContainerRegistry.ContainerRegistryManagementClient);
+        const webhookCreateParameters: WebhookCreateParameters = {
+            location: registryTreeItem.wrappedItem.registryProperties.location,
             serviceUri: appUri,
-            scope: `${node.parent.repoName}:${node.tag}`,
+            scope: `${this.tagItem.parent.wrappedItem.label}:${this.tagItem.wrappedItem.label}`,
             actions: ["push"],
             status: 'enabled'
         };
-        return await crmClient.webhooks.create(registryTreeItem.resourceGroup, registryTreeItem.registryName, webhookName, webhookCreateParameters);
+        const resourceGroup = getResourceGroupFromAzureRegistryItem(registryTreeItem.wrappedItem);
+        return await crmClient.webhooks.beginCreateAndWait(resourceGroup, registryTreeItem.wrappedItem.label, webhookName, webhookCreateParameters);
     }
 }

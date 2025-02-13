@@ -3,11 +3,11 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IActionContext } from 'vscode-azureextensionui';
+import { IActionContext } from '@microsoft/vscode-azext-utils';
+import { l10n } from 'vscode';
 import { ext } from '../../extensionVariables';
-import { localize } from '../../localize';
+import { TaskCommandRunnerFactory } from '../../runtimes/runners/TaskCommandRunnerFactory';
 import { ContainerTreeItem } from '../../tree/containers/ContainerTreeItem';
-import { executeAsTask } from '../../utils/executeAsTask';
 import { selectLogsCommand } from '../selectCommandTemplate';
 
 export async function viewContainerLogs(context: IActionContext, node?: ContainerTreeItem): Promise<void> {
@@ -15,18 +15,22 @@ export async function viewContainerLogs(context: IActionContext, node?: Containe
         await ext.containersTree.refresh(context);
         node = await ext.containersTree.showTreeItemPicker<ContainerTreeItem>(ContainerTreeItem.allContextRegExp, {
             ...context,
-            noItemFoundErrorMessage: localize('vscode-docker.commands.containers.viewLogs.noContainers', 'No containers are available to view logs')
+            noItemFoundErrorMessage: l10n.t('No containers are available to view logs')
         });
     }
 
     const terminalCommand = await selectLogsCommand(
         context,
         node.containerName,
-        node.fullTag,
+        node.imageName,
         node.containerId
     );
 
-    const terminalTitle = localize('vscode-docker.commands.containers.viewLogs.terminalTitle', 'Logs: {0}', node.containerName);
+    const taskCRF = new TaskCommandRunnerFactory({
+        taskName: l10n.t('Logs: {0}', node.containerName),
+        alwaysRunNew: true,
+        focus: true,
+    });
 
-    await executeAsTask(context, terminalCommand, terminalTitle, { addDockerEnv: true });
+    await taskCRF.getCommandRunner()(terminalCommand);
 }

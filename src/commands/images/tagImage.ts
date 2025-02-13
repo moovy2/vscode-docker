@@ -3,34 +3,39 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { IActionContext, TelemetryProperties } from '@microsoft/vscode-azext-utils';
+import { CommonRegistry, isRegistry } from '@microsoft/vscode-docker-registries';
 import * as vscode from 'vscode';
-import { IActionContext, TelemetryProperties } from 'vscode-azureextensionui';
 import { ext } from '../../extensionVariables';
-import { localize } from '../../localize';
 import { ImageTreeItem } from '../../tree/images/ImageTreeItem';
-import { RegistryTreeItemBase } from '../../tree/registries/RegistryTreeItemBase';
+import { UnifiedRegistryItem } from '../../tree/registries/UnifiedRegistryTreeDataProvider';
+import { getBaseImagePathFromRegistry } from '../../tree/registries/registryTreeUtils';
 
-export async function tagImage(context: IActionContext, node?: ImageTreeItem, registry?: RegistryTreeItemBase): Promise<string> {
+export async function tagImage(context: IActionContext, node?: ImageTreeItem, registry?: UnifiedRegistryItem<CommonRegistry>): Promise<string> {
     if (!node) {
         await ext.imagesTree.refresh(context);
         node = await ext.imagesTree.showTreeItemPicker<ImageTreeItem>(ImageTreeItem.contextValue, {
             ...context,
-            noItemFoundErrorMessage: localize('vscode-docker.commands.images.tag.noImages', 'No images are available to tag')
+            noItemFoundErrorMessage: vscode.l10n.t('No images are available to tag')
         });
     }
 
     addImageTaggingTelemetry(context, node.fullTag, '.before');
-    const newTaggedName: string = await getTagFromUserInput(context, node.fullTag, registry?.baseImagePath);
+    const baseImagePath = isRegistry(registry?.wrappedItem) ? getBaseImagePathFromRegistry(registry.wrappedItem) : undefined;
+    const newTaggedName: string = await getTagFromUserInput(context, node.fullTag, baseImagePath);
     addImageTaggingTelemetry(context, newTaggedName, '.after');
 
-    await ext.dockerClient.tagImage(context, node.imageId, newTaggedName);
+    await ext.runWithDefaults(client =>
+        client.tagImage({ fromImageRef: node.imageId, toImageRef: newTaggedName })
+    );
+
     return newTaggedName;
 }
 
 export async function getTagFromUserInput(context: IActionContext, fullTag: string, baseImagePath?: string): Promise<string> {
     const opt: vscode.InputBoxOptions = {
         ignoreFocusOut: true,
-        prompt: localize('vscode-docker.commands.images.tag.tagAs', 'Tag image as...'),
+        prompt: vscode.l10n.t('Tag image as...'),
     };
 
     if (fullTag.includes('/')) {
@@ -47,9 +52,10 @@ export async function getTagFromUserInput(context: IActionContext, fullTag: stri
 
 const KnownRegistries: { type: string, regex: RegExp }[] = [
     // Like username/path
-    { type: 'dockerhub-namespace', regex: /^[^.:]+\/[^.:]+\/$/ },
+    { type: 'dockerhub-namespace', regex: /^[^.:]+\/[^.:]+$/ },
 
     { type: 'dockerhub-dockerio', regex: /^docker.io.*\// },
+    { type: 'github', regex: /ghcr\.io.*\// },
     { type: 'gitlab', regex: /gitlab.*\// },
     { type: 'ACR', regex: /azurecr\.io.*\// },
     { type: 'GCR', regex: /gcr\.io.*\// },

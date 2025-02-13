@@ -3,25 +3,31 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { IActionContext } from '@microsoft/vscode-azext-utils';
 import * as vscode from 'vscode';
-import { IActionContext } from 'vscode-azureextensionui';
 import { ext } from '../../extensionVariables';
-import { localize } from '../../localize';
 
 export async function pruneNetworks(context: IActionContext): Promise<void> {
-    const confirmPrune: string = localize('vscode-docker.commands.networks.prune.confirm', 'Are you sure you want to remove all unused networks?');
+    const confirmPrune: string = vscode.l10n.t('Are you sure you want to remove all unused networks?');
     // no need to check result - cancel will throw a UserCancelledError
-    await context.ui.showWarningMessage(confirmPrune, { modal: true }, { title: localize('vscode-docker.commands.networks.prune.remove', 'Remove') });
+    await context.ui.showWarningMessage(confirmPrune, { modal: true }, { title: vscode.l10n.t('Remove') });
 
     await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: localize('vscode-docker.commands.networks.pruning', 'Pruning networks...') },
+        { location: vscode.ProgressLocation.Notification, title: vscode.l10n.t('Pruning networks...') },
         async () => {
-            const result = await ext.dockerClient.pruneNetworks(context);
+            const result = await ext.runWithDefaults(client =>
+                client.pruneNetworks({})
+            );
 
-            const message = localize('vscode-docker.commands.networks.prune.removed', 'Removed {0} network(s).', result.ObjectsDeleted);
-            // don't wait
-            /* eslint-disable-next-line @typescript-eslint/no-floating-promises */
-            vscode.window.showInformationMessage(message);
+            let message: string;
+            if (result?.networksDeleted?.length) {
+                message = vscode.l10n.t('Removed {0} unused networks(s).', result.networksDeleted.length);
+            } else {
+                message = vscode.l10n.t('Removed unused networks.');
+            }
+
+            // Don't wait
+            void vscode.window.showInformationMessage(message);
         }
     );
 }

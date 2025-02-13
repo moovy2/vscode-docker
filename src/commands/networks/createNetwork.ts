@@ -3,22 +3,21 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IActionContext } from 'vscode-azureextensionui';
-import { DriverType } from '../../docker/Networks';
+import { IActionContext } from '@microsoft/vscode-azext-utils';
+import { l10n } from 'vscode';
 import { ext } from '../../extensionVariables';
-import { localize } from '../../localize';
 import { getDockerOSType } from '../../utils/osUtils';
 
 export async function createNetwork(context: IActionContext): Promise<void> {
 
     const name = await context.ui.showInputBox({
         value: '',
-        prompt: localize('vscode-docker.commands.networks.create.promptName', 'Name of the network')
+        prompt: l10n.t('Name of the network')
     });
 
-    const osType = await getDockerOSType(context);
+    const osType = await getDockerOSType();
 
-    const drivers: { label: DriverType }[] = osType === 'windows'
+    const drivers: { label: string }[] = osType === 'windows'
         ? [
             { label: 'nat' },
             { label: 'transparent' }
@@ -33,9 +32,11 @@ export async function createNetwork(context: IActionContext): Promise<void> {
         drivers,
         {
             canPickMany: false,
-            placeHolder: localize('vscode-docker.commands.networks.create.promptDriver', 'Select the network driver to use (default is "bridge").')
+            placeHolder: l10n.t('Select the network driver to use (default is "bridge").')
         }
     );
 
-    await ext.dockerClient.createNetwork(context, { Name: name, Driver: driverSelection.label });
+    await ext.runWithDefaults(client =>
+        client.createNetwork({ name: name, driver: driverSelection.label })
+    );
 }

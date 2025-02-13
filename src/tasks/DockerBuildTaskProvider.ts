@@ -5,19 +5,17 @@
 
 import * as fse from 'fs-extra';
 import * as path from 'path';
-import { Task } from 'vscode';
-import { DockerPlatform } from '../debugging/DockerPlatformHelper';
-import { localize } from '../localize';
+import { l10n, Task } from 'vscode';
+import { DockerPlatform } from '../debugging/DockerDebugPlatformHelper';
+import { ext } from '../extensionVariables';
 import { cloneObject } from '../utils/cloneObject';
-import { CommandLineBuilder } from '../utils/commandLineBuilder';
-import { dockerExePath } from '../utils/dockerExePathProvider';
 import { resolveVariables } from '../utils/resolveVariables';
 import { DockerBuildOptions } from './DockerBuildTaskDefinitionBase';
 import { DockerTaskProvider } from './DockerTaskProvider';
 import { NetCoreBuildTaskDefinition } from './netcore/NetCoreTaskHelper';
 import { NodeBuildTaskDefinition } from './node/NodeTaskHelper';
 import { defaultVsCodeLabels, getAggregateLabels } from './TaskDefinitionBase';
-import { DockerBuildTaskContext, TaskHelper, throwIfCancellationRequested } from './TaskHelper';
+import { DockerBuildTaskContext, normalizePlatform, TaskHelper, throwIfCancellationRequested } from './TaskHelper';
 
 export interface DockerBuildTaskDefinition extends NetCoreBuildTaskDefinition, NodeBuildTaskDefinition {
     label?: string;
@@ -51,17 +49,27 @@ export class DockerBuildTaskProvider extends DockerTaskProvider {
 
         await this.validateResolvedDefinition(context, definition.dockerBuild);
 
-        const commandLine = await this.resolveCommandLine(definition.dockerBuild);
+        const client = await ext.runtimeManager.getClient();
 
-        // Because BuildKit outputs everything to stderr, we will not treat output there as a failure
-        await context.terminal.executeCommandInTerminal(
-            commandLine,
-            context.folder,
-            false, // rejectOnStderr
-            undefined, // stdoutBuffer
-            Buffer.alloc(10 * 1024), // stderrBuffer
-            context.cancellationToken
-        );
+        const options = definition.dockerBuild;
+        const command = await client.buildImage({
+            pull: options.pull,
+            file: options.dockerfile,
+            args: options.buildArgs,
+            labels: getAggregateLabels(options.labels, defaultVsCodeLabels),
+            tags: [options.tag],
+            stage: options.target,
+            platform: normalizePlatform(options.platform),
+            customOptions: options.customOptions,
+            path: options.context,
+        });
+
+        const runner = context.terminal.getCommandRunner({
+            folder: context.folder,
+            token: context.cancellationToken,
+        });
+
+        await runner(command);
         throwIfCancellationRequested(context);
 
         context.imageName = definition.dockerBuild.tag;
@@ -72,33 +80,14 @@ export class DockerBuildTaskProvider extends DockerTaskProvider {
     }
 
     private async validateResolvedDefinition(context: DockerBuildTaskContext, dockerBuild: DockerBuildOptions): Promise<void> {
-        if (!dockerBuild.tag) {
-            throw new Error(localize('vscode-docker.tasks.buildProvider.noDockerImage', 'No Docker image name was provided or resolved.'));
-        }
-
         if (!dockerBuild.context) {
-            throw new Error(localize('vscode-docker.tasks.buildProvider.noBuildContext', 'No Docker build context was provided or resolved.'));
+            throw new Error(l10n.t('No Docker build context was provided or resolved.'));
         } else if (!await fse.pathExists(path.resolve(context.folder.uri.fsPath, resolveVariables(dockerBuild.context, context.folder)))) {
-            throw new Error(localize('vscode-docker.tasks.buildProvider.invalidBuildContext', 'The Docker build context \'{0}\' does not exist or could not be accessed.', dockerBuild.context));
+            throw new Error(l10n.t('The Docker build context \'{0}\' does not exist or could not be accessed.', dockerBuild.context));
         }
 
-        if (!dockerBuild.dockerfile) {
-            throw new Error(localize('vscode-docker.tasks.buildProvider.noDockerfile', 'No Dockerfile was provided or resolved.'));
-        } else if (!await fse.pathExists(path.resolve(context.folder.uri.fsPath, resolveVariables(dockerBuild.dockerfile, context.folder)))) {
-            throw new Error(localize('vscode-docker.tasks.buildProvider.invalidDockerfile', 'The Dockerfile \'{0}\' does not exist or could not be accessed.', dockerBuild.dockerfile));
+        if (dockerBuild.dockerfile && !await fse.pathExists(path.resolve(context.folder.uri.fsPath, resolveVariables(dockerBuild.dockerfile, context.folder)))) {
+            throw new Error(l10n.t('The Dockerfile \'{0}\' does not exist or could not be accessed.', dockerBuild.dockerfile));
         }
-    }
-
-    private async resolveCommandLine(options: DockerBuildOptions): Promise<CommandLineBuilder> {
-        return CommandLineBuilder
-            .create(dockerExePath(), 'build', '--rm')
-            .withFlagArg('--pull', options.pull)
-            .withNamedArg('-f', options.dockerfile)
-            .withKeyValueArgs('--build-arg', options.buildArgs)
-            .withKeyValueArgs('--label', getAggregateLabels(options.labels, defaultVsCodeLabels))
-            .withNamedArg('-t', options.tag)
-            .withNamedArg('--target', options.target)
-            .withArg(options.customOptions)
-            .withQuotedArg(options.context);
     }
 }

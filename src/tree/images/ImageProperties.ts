@@ -3,22 +3,35 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { ListImagesItem } from "@microsoft/vscode-container-client";
 import { ThemeIcon, workspace } from "vscode";
 import { configPrefix } from "../../constants";
-import { DockerImage } from "../../docker/Images";
 import { trimWithElipsis } from "../../utils/trimWithElipsis";
-import { CommonGroupBy, commonProperties, CommonProperty, getCommonGroupIcon, getCommonPropertyValue } from '../settings/CommonProperties';
+import { CommonGroupBy, CommonProperty, commonProperties, getCommonGroupIcon, getCommonPropertyValue } from '../settings/CommonProperties';
 import { ITreePropertyInfo } from '../settings/ITreeSettingInfo';
+import { NormalizedImageNameInfo } from "./NormalizedImageNameInfo";
 
-export type ImageProperty = CommonProperty | 'FullTag' | 'ImageId' | 'Registry' | 'Repository' | 'RepositoryName' | 'RepositoryNameAndTag' | 'Tag';
+export type ImageProperty =
+    | CommonProperty
+    | 'FullTag'
+    | 'ImageId'
+    | 'Registry'
+    | 'RegistryAndPath'
+    | 'Repository'
+    | 'RepositoryNameShort'
+    | 'RepositoryName'
+    | 'RepositoryNameAndTag'
+    | 'Tag';
 
 export const imageProperties: ITreePropertyInfo<ImageProperty>[] = [
     ...commonProperties,
     { property: 'FullTag', exampleValue: 'example.azurecr.io/hello-world:latest' },
     { property: 'ImageId', exampleValue: 'd9d09edd6115' },
     { property: 'Registry', exampleValue: 'example.azurecr.io' },
-    { property: 'Repository', exampleValue: 'example.azurecr.io/hello-world' },
-    { property: 'RepositoryName', exampleValue: 'hello-world' },
+    { property: 'RegistryAndPath', exampleValue: 'example.azurecr.io/my-path/hello-world' },
+    { property: 'Repository', exampleValue: 'example.azurecr.io' },
+    { property: 'RepositoryNameShort', exampleValue: 'hello-world' },
+    { property: 'RepositoryName', exampleValue: 'my-path/hello-world' },
     { property: 'RepositoryNameAndTag', exampleValue: 'hello-world:latest' },
     { property: 'Tag', exampleValue: 'latest' },
     { property: 'Size', exampleValue: '27 MB' },
@@ -27,9 +40,11 @@ export const imageProperties: ITreePropertyInfo<ImageProperty>[] = [
 export function getImageGroupIcon(property: ImageProperty | CommonGroupBy): ThemeIcon {
     switch (property) {
         case 'Registry':
+        case 'RegistryAndPath':
             return new ThemeIcon('briefcase');
         case 'Repository':
         case 'RepositoryName':
+        case 'RepositoryNameShort':
             return new ThemeIcon('repo');
         case 'FullTag':
         case 'ImageId':
@@ -42,87 +57,49 @@ export function getImageGroupIcon(property: ImageProperty | CommonGroupBy): Them
     }
 }
 
-export function getImagePropertyValue(item: DockerImage, property: ImageProperty): string {
-    const parsedFullTag = parseFullTag(item.Name);
-    let registry: string | undefined;
+export function getImagePropertyValue(item: ListImagesItem, property: ImageProperty): string {
+    const normalizedImageNameInfo = new NormalizedImageNameInfo(item.image);
+
+    let result: string;
     switch (property) {
         case 'FullTag':
-            if (parsedFullTag.registry) {
-                return item.Name.replace(parsedFullTag.registry, truncateRegistry(parsedFullTag.registry));
-            } else {
-                return item.Name;
-            }
+            result = normalizedImageNameInfo.fullTag;
+            break;
         case 'ImageId':
-            return item.Id.replace('sha256:', '').slice(0, 12);
+            result = item.id.replace('sha256:', '').slice(0, 12);
+            break;
         case 'Registry':
-            registry = parsedFullTag.registry;
-            if (!registry) {
-                registry = 'docker.io' + '/' + (parsedFullTag.namespace || 'library');
-            }
-            return truncateRegistry(registry);
+            result = normalizedImageNameInfo.normalizedRegistry;
+            break;
+        case 'RegistryAndPath':
+            result = normalizedImageNameInfo.normalizedRegistryAndPath;
+            break;
         case 'Repository':
-            registry = parsedFullTag.registry || parsedFullTag.namespace;
-            if (registry) {
-                return truncateRegistry(registry) + '/' + parsedFullTag.repositoryName;
-            } else {
-                return parsedFullTag.repositoryName;
-            }
+            result = normalizedImageNameInfo.normalizedRegistryAndImageName;
+            break;
         case 'RepositoryName':
-            return parsedFullTag.repositoryName;
+            result = normalizedImageNameInfo.normalizedImageName;
+            break;
+        case 'RepositoryNameShort':
+            result = normalizedImageNameInfo.normalizedImageShortName;
+            break;
         case 'RepositoryNameAndTag':
-            if (parsedFullTag.tag) {
-                return parsedFullTag.repositoryName + ':' + parsedFullTag.tag;
-            } else {
-                return parsedFullTag.repositoryName;
-            }
+            result = normalizedImageNameInfo.normalizedImageNameAndTag;
+            break;
         case 'Tag':
-            return parsedFullTag.tag || 'latest';
+            result = normalizedImageNameInfo.normalizedTag;
+            break;
         default:
-            return getCommonPropertyValue(item, property);
-    }
-}
-
-interface IParsedFullTag {
-    registry?: string;
-    namespace?: string;
-    repositoryName: string;
-    tag?: string;
-}
-
-function parseFullTag(rawTag: string): IParsedFullTag {
-    let registry: string | undefined;
-    let namespace: string | undefined;
-    let tag: string | undefined;
-
-    // Pull out registry or namespace from the beginning
-    let index = rawTag.indexOf('/');
-    if (index !== -1) {
-        const firstPart = rawTag.substring(0, index);
-        if (firstPart === 'localhost' || /[:.]/.test(firstPart)) {
-            // The hostname must contain a . dns separator or a : port separator before the first /
-            // https://stackoverflow.com/questions/37861791/how-are-docker-image-names-parsed
-            registry = firstPart;
-        } else {
-            // otherwise it's a part of docker.io and the first part is a namespace
-            namespace = firstPart;
-        }
-
-        rawTag = rawTag.substring(index + 1);
+            result = getCommonPropertyValue(item, property);
+            break;
     }
 
-    // Pull out tag from the end
-    index = rawTag.lastIndexOf(':');
-    if (index !== -1) {
-        tag = rawTag.substring(index + 1);
-        rawTag = rawTag.substring(0, index);
+    // Regardless of the above result, truncate the registry if it is in the string
+    if (item.image.registry) {
+        result = result.replace(item.image.registry, truncateRegistry(item.image.registry));
     }
 
-    return {
-        registry,
-        repositoryName: rawTag,
-        namespace,
-        tag
-    };
+    return result;
 }
 
 function truncateRegistry(registry: string): string {

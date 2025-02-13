@@ -3,17 +3,19 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IActionContext, openReadOnlyJson } from "vscode-azureextensionui";
+import { IActionContext, openReadOnlyJson } from "@microsoft/vscode-azext-utils";
+import { l10n } from 'vscode';
 import { ext } from "../../extensionVariables";
-import { localize } from "../../localize";
 import { VolumeTreeItem } from "../../tree/volumes/VolumeTreeItem";
 
 export async function inspectVolume(context: IActionContext, node?: VolumeTreeItem): Promise<void> {
     if (!node) {
         await ext.volumesTree.refresh(context);
-        node = await ext.volumesTree.showTreeItemPicker<VolumeTreeItem>(VolumeTreeItem.contextValue, { ...context, noItemFoundErrorMessage: localize('vscode-docker.commands.volumes.inspect.noVolumes', 'No volumes are available to inspect') });
+        node = await ext.volumesTree.showTreeItemPicker<VolumeTreeItem>(VolumeTreeItem.contextValue, { ...context, noItemFoundErrorMessage: l10n.t('No volumes are available to inspect') });
     }
 
-    const inspectInfo = await ext.dockerClient.inspectVolume(context, node.volumeName);
-    await openReadOnlyJson(node, inspectInfo);
+    const inspectResult = await ext.runWithDefaults(client =>
+        client.inspectVolumes({ volumes: [node.volumeName] })
+    );
+    await openReadOnlyJson(node, JSON.parse(inspectResult[0].raw));
 }

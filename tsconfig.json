@@ -1,23 +1,23 @@
 {
     "compilerOptions": {
         "module": "commonjs",
-        "target": "es6",
+        "target": "es2018",
         "outDir": "out",
         "lib": [
-            "es6"
+            "es2018"
         ],
         "sourceMap": true,
         "rootDir": "src",
         "strict": true, /* enable all strict type-checking options */
         "alwaysStrict": true,
         "noFallthroughCasesInSwitch": true,
+        "noImplicitReturns": true,
         "noImplicitThis": true,
         "noUnusedLocals": false, // ESLint takes care of this for us
         "noUnusedParameters": false, // ESLint takes care of this for us
         "noImplicitAny": false, // TODO
-        "noImplicitReturns": false, // TODO
+        "noImplicitOverride": false, // TODO
         "strictNullChecks": false, // TODO
-        "skipLibCheck": true // Ignore typing issues in libraries
     },
     "exclude": [
         "node_modules",

@@ -3,16 +3,16 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { CancellationToken, ConfigurationTarget, debug, DebugConfiguration, ExtensionContext, workspace, WorkspaceFolder } from 'vscode';
-import { IActionContext } from 'vscode-azureextensionui';
-import { localize } from '../localize';
+import { IActionContext } from '@microsoft/vscode-azext-utils';
+import { CancellationToken, ConfigurationTarget, debug, DebugConfiguration, ExtensionContext, l10n, workspace, WorkspaceFolder } from 'vscode';
 import { DockerRunTaskDefinition } from '../tasks/DockerRunTaskProvider';
 import { DockerTaskScaffoldContext, getDefaultContainerName } from '../tasks/TaskHelper';
 import { DockerServerReadyAction } from './DockerDebugConfigurationBase';
 import { DockerDebugConfiguration, DockerDebugConfigurationProvider } from './DockerDebugConfigurationProvider';
-import { DockerPlatform } from './DockerPlatformHelper';
+import { DockerPlatform } from './DockerDebugPlatformHelper';
 import { registerServerReadyAction } from './DockerServerReadyAction';
 import { netCoreDebugHelper } from './netcore/NetCoreDebugHelper';
+import { netSdkDebugHelper } from './netSdk/NetSdkDebugHelper';
 import { nodeDebugHelper } from './node/NodeDebugHelper';
 import { pythonDebugHelper } from './python/PythonDebugHelper';
 
@@ -41,6 +41,7 @@ export interface ResolvedDebugConfiguration extends DebugConfiguration {
 export interface DebugHelper {
     provideDebugConfigurations(context: DockerDebugScaffoldContext): Promise<DockerDebugConfiguration[]>;
     resolveDebugConfiguration(context: DockerDebugContext, debugConfiguration: DockerDebugConfiguration): Promise<ResolvedDebugConfiguration | undefined>;
+    afterResolveDebugConfiguration?(context: DockerDebugContext, debugConfiguration: DockerDebugConfiguration): Promise<void>;
 }
 
 export function registerDebugProvider(ctx: ExtensionContext): void {
@@ -52,6 +53,7 @@ export function registerDebugProvider(ctx: ExtensionContext): void {
                     netCore: netCoreDebugHelper,
                     node: nodeDebugHelper,
                     python: pythonDebugHelper,
+                    netSdk: netSdkDebugHelper
                 }
             )
         )
@@ -95,7 +97,7 @@ export function resolveDockerServerReadyAction(debugConfiguration: DockerDebugCo
 
     if (numBrowserOptions > 1) {
         // Multiple user-provided options is not valid
-        throw new Error(localize('vscode-docker.debug.helper.oneBrowserAction', 'Only at most one of the \'launchBrowser\', \'serverReadyAction\', and \'dockerServerReadyAction\' properties may be set at a time.'));
+        throw new Error(l10n.t('Only at most one of the \'launchBrowser\', \'serverReadyAction\', and \'dockerServerReadyAction\' properties may be set at a time.'));
     } else if (numBrowserOptions === 1 && !debugConfiguration.dockerServerReadyAction) {
         // One user-provided option that is not DockerServerReadyAction--return nothing
         return undefined;

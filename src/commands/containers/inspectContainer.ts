@@ -3,9 +3,9 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IActionContext, openReadOnlyJson } from "vscode-azureextensionui";
+import { IActionContext, openReadOnlyJson } from "@microsoft/vscode-azext-utils";
+import { l10n } from 'vscode';
 import { ext } from "../../extensionVariables";
-import { localize } from '../../localize';
 import { ContainerTreeItem } from "../../tree/containers/ContainerTreeItem";
 
 export async function inspectContainer(context: IActionContext, node?: ContainerTreeItem): Promise<void> {
@@ -13,10 +13,12 @@ export async function inspectContainer(context: IActionContext, node?: Container
         await ext.containersTree.refresh(context);
         node = await ext.containersTree.showTreeItemPicker<ContainerTreeItem>(ContainerTreeItem.allContextRegExp, {
             ...context,
-            noItemFoundErrorMessage: localize('vscode-docker.commands.containers.inspect.noContainers', 'No containers are available to inspect')
+            noItemFoundErrorMessage: l10n.t('No containers are available to inspect')
         });
     }
 
-    const inspectInfo = await ext.dockerClient.inspectContainer(context, node.containerId);
-    await openReadOnlyJson(node, inspectInfo);
+    const inspectInfo = await ext.runWithDefaults(client =>
+        client.inspectContainers({ containers: [node.containerId] })
+    );
+    await openReadOnlyJson(node, JSON.parse(inspectInfo[0].raw));
 }

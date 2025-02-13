@@ -3,31 +3,25 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { AzExtTreeItem, AzureWizard, AzureWizardExecuteStep, AzureWizardPromptStep, IActionContext, ICreateChildImplContext, ResourceGroupListStep } from 'vscode-azureextensionui';
-import { DockerContext } from '../../docker/Contexts';
+import { AzExtTreeItem, IActionContext } from '@microsoft/vscode-azext-utils';
+import { ListContextItem } from '@microsoft/vscode-container-client';
+import { l10n } from 'vscode';
 import { ext } from '../../extensionVariables';
-import { localize } from '../../localize';
-import { descriptionKey, labelKey, LocalChildGroupType, LocalChildType, LocalRootTreeItemBase } from "../LocalRootTreeItemBase";
-import { RegistryApi } from '../registries/all/RegistryApi';
-import { AzureAccountTreeItem } from '../registries/azure/AzureAccountTreeItem';
-import { azureRegistryProviderId } from '../registries/azure/azureRegistryProvider';
+import { LocalChildGroupType, LocalChildType, LocalRootTreeItemBase, descriptionKey, labelKey } from "../LocalRootTreeItemBase";
+import { TreePrefix } from '../TreePrefix';
 import { CommonGroupBy, groupByNoneProperty } from "../settings/CommonProperties";
 import { ITreeArraySettingInfo, ITreeSettingInfo } from "../settings/ITreeSettingInfo";
 import { ITreeSettingWizardInfo } from '../settings/ITreeSettingsWizardContext';
-import { AciContextCreateStep } from './aci/AciContextCreateStep';
-import { ContextNameStep } from './aci/ContextNameStep';
-import { IAciWizardContext } from './aci/IAciWizardContext';
 import { ContextGroupTreeItem } from './ContextGroupTreeItem';
-import { contextProperties, ContextProperty } from "./ContextProperties";
+import { ContextProperty, contextProperties } from "./ContextProperties";
 import { ContextTreeItem } from './ContextTreeItem';
 
-export class ContextsTreeItem extends LocalRootTreeItemBase<DockerContext, ContextProperty> {
-    public treePrefix: string = 'contexts';
-    public label: string = localize('vscode-docker.tree.Contexts.label', 'Contexts');
-    public configureExplorerTitle: string = localize('vscode-docker.tree.Contexts.configure', 'Configure Docker Contexts Explorer');
-    public childType: LocalChildType<DockerContext> = ContextTreeItem;
-    public childGroupType: LocalChildGroupType<DockerContext, ContextProperty> = ContextGroupTreeItem;
-    public createNewLabel: string = localize('vscode-docker.tree.Contexts.createNewLabel', 'Create new ACI context...');
+export class ContextsTreeItem extends LocalRootTreeItemBase<ListContextItem, ContextProperty> {
+    public treePrefix: TreePrefix = 'contexts';
+    public label: string = l10n.t('Contexts');
+    public configureExplorerTitle: string = l10n.t('Configure Docker Contexts Explorer');
+    public childType: LocalChildType<ListContextItem> = ContextTreeItem;
+    public childGroupType: LocalChildGroupType<ListContextItem, ContextProperty> = ContextGroupTreeItem;
 
     public labelSettingInfo: ITreeSettingInfo<ContextProperty> = {
         properties: contextProperties,
@@ -48,18 +42,18 @@ export class ContextsTreeItem extends LocalRootTreeItemBase<DockerContext, Conte
         return this.groupBySetting === 'None' ? 'context' : 'context group';
     }
 
-    public async getItems(context: IActionContext): Promise<DockerContext[]> {
-        return ext.dockerContextManager.getContexts();
+    public async getItems(actionContext: IActionContext): Promise<ListContextItem[]> {
+        return ext.runtimeManager.contextManager.getContexts();
     }
 
-    public getPropertyValue(item: DockerContext, property: ContextProperty): string {
+    public getPropertyValue(item: ListContextItem, property: ContextProperty): string {
         switch (property) {
             case 'Name':
-                return item.Name;
+                return item.name;
             case 'Description':
-                return item.Description;
+                return item.description ?? '';
             case 'DockerEndpoint':
-                return item.DockerEndpoint;
+                return item.containerEndpoint ?? '';
             default:
                 // No other properties exist for DockerContext but all case statements must have a default
                 // So return empty string
@@ -74,62 +68,19 @@ export class ContextsTreeItem extends LocalRootTreeItemBase<DockerContext, Conte
     public getSettingWizardInfoList(): ITreeSettingWizardInfo[] {
         return [
             {
-                label: localize('vscode-docker.tree.contextConfig.label.label', 'Label'),
+                label: l10n.t('Label'),
                 setting: labelKey,
                 currentValue: this.labelSetting,
-                description: localize('vscode-docker.tree.contextConfig.label.description', 'The primary property to display.'),
+                description: l10n.t('The primary property to display.'),
                 settingInfo: this.labelSettingInfo
             },
             {
-                label: localize('vscode-docker.tree.contextConfig.description.label', 'Description'),
+                label: l10n.t('Description'),
                 setting: descriptionKey,
                 currentValue: this.descriptionSetting,
-                description: localize('vscode-docker.tree.contextConfig.description.description', 'Any secondary properties to display.'),
+                description: l10n.t('Any secondary properties to display.'),
                 settingInfo: this.descriptionSettingInfo
             }
         ];
-    }
-
-    public async createChildImpl(actionContext: ICreateChildImplContext): Promise<ContextTreeItem> {
-        const wizardContext: IActionContext & Partial<IAciWizardContext> = {
-            ...actionContext,
-        };
-
-        // Set up the prompt steps
-        const promptSteps: AzureWizardPromptStep<IAciWizardContext>[] = [
-            new ContextNameStep(),
-        ];
-
-        // Create a temporary azure account tree item since Azure might not be connected
-        const azureAccountTreeItem = new AzureAccountTreeItem(ext.registriesRoot, { id: azureRegistryProviderId, api: RegistryApi.DockerV2 });
-
-        // Add a subscription prompt step (skipped if there is exactly one subscription)
-        const subscriptionStep = await azureAccountTreeItem.getSubscriptionPromptStep(wizardContext);
-        if (subscriptionStep) {
-            promptSteps.push(subscriptionStep);
-        }
-
-        // Add additional prompt steps
-        promptSteps.push(new ResourceGroupListStep());
-
-        // Set up the execute steps
-        const executeSteps: AzureWizardExecuteStep<IAciWizardContext>[] = [
-            new AciContextCreateStep(),
-        ];
-
-        const title = localize('vscode-docker.commands.contexts.create.aci.title', 'Create new Azure Container Instances context');
-
-        const wizard = new AzureWizard(wizardContext, { title, promptSteps, executeSteps });
-        await wizard.prompt();
-        await wizard.execute();
-
-        return new ContextTreeItem(this, {
-            Id: wizardContext.contextName,
-            Name: wizardContext.contextName,
-            Current: false,
-            DockerEndpoint: undefined,
-            CreatedTime: undefined,
-            ContextType: 'aci',
-        });
     }
 }

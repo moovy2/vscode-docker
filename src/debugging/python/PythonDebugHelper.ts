@@ -7,11 +7,9 @@ import * as path from 'path';
 import { ext } from '../../extensionVariables';
 import { PythonExtensionHelper } from '../../tasks/python/PythonExtensionHelper';
 import { PythonRunTaskDefinition } from '../../tasks/python/PythonTaskHelper';
-import { dockerExePath } from '../../utils/dockerExePathProvider';
-import { getVSCodeRemoteInfo, RemoteKind } from '../../utils/getVSCodeRemoteInfo';
 import { isLinux } from '../../utils/osUtils';
 import { PythonProjectType } from '../../utils/pythonUtils';
-import { DebugHelper, DockerDebugContext, DockerDebugScaffoldContext, inferContainerName, ResolvedDebugConfiguration, resolveDockerServerReadyAction } from '../DebugHelper';
+import { DebugHelper, DockerDebugContext, DockerDebugScaffoldContext, ResolvedDebugConfiguration, inferContainerName, resolveDockerServerReadyAction } from '../DebugHelper';
 import { DockerDebugConfigurationBase } from '../DockerDebugConfigurationBase';
 import { DockerDebugConfiguration } from '../DockerDebugConfigurationProvider';
 import { PythonScaffoldingOptions } from '../DockerDebugScaffoldingProvider';
@@ -80,12 +78,12 @@ export class PythonDebugHelper implements DebugHelper {
                 },
                 true);
 
-        const args = [...(debugConfiguration.python.args || pythonRunTaskOptions.args || []), dockerExePath(context.actionContext), containerName];
+        const args = [...(debugConfiguration.python.args || pythonRunTaskOptions.args || []), await ext.runtimeManager.getCommand(), containerName];
         const launcherPath = path.join(ext.context.asAbsolutePath('resources'), 'python', 'launcher.py');
 
         return {
             ...{ ...debugConfiguration, python: undefined }, // Get the original debug configuration, minus the "python" property which belongs to the Docker launch config and confuses the Python extension
-            type: 'python',
+            type: 'debugpy',
             request: 'launch',
             pathMappings: debugConfiguration.python.pathMappings,
             justMyCode: debugConfiguration.python.justMyCode ?? true,
@@ -98,7 +96,7 @@ export class PythonDebugHelper implements DebugHelper {
                 removeContainerAfterDebug: debugConfiguration.removeContainerAfterDebug
             },
             debugLauncherPath: debugConfiguration.debugLauncherPath || launcherPath,
-            debugAdapterHost: debugConfiguration.debugAdapterHost || await this.getDebugAdapterHost(context) || '172.17.0.1', // 172.17.0.1 is the default gateway for the bridge network
+            debugAdapterHost: debugConfiguration.debugAdapterHost || await this.tryGetDebugAdapterHost(context) || '172.17.0.1', // 172.17.0.1 is the default gateway for the bridge network
             console: debugConfiguration.console || "integratedTerminal",
             internalConsoleOptions: debugConfiguration.internalConsoleOptions || "openOnSessionStart",
             module: debugConfiguration.module || pythonRunTaskOptions.module,
@@ -138,18 +136,29 @@ export class PythonDebugHelper implements DebugHelper {
         }
     }
 
-    private async getDebugAdapterHost(context: DockerDebugContext): Promise<string> {
-        // For Windows, Mac, and WSL, we ask debugpy to listen on localhost:{randomPort} and then
+    private async tryGetDebugAdapterHost(context: DockerDebugContext): Promise<string | undefined> {
+        // For Windows and Mac we ask debugpy to listen on localhost:{randomPort} and then
         // we use 'host.docker.internal' in the launcher to get the host's ip address.
-        if (!isLinux() || getVSCodeRemoteInfo(context.actionContext).remoteKind === RemoteKind.wsl) {
+        if (!isLinux()) {
             return 'localhost';
         }
 
-        // For Linux, 'host.docker.internal' doesn't work, so we ask debugpy to listen
-        // on the bridge network's ip address (predefined network).
-        const networkInspection = await ext.dockerClient.inspectNetwork(context.actionContext, 'bridge', context.cancellationToken);
+        // For Docker Desktop on WSL or Linux, we also use 'localhost'
+        const dockerInfo = await ext.runWithDefaults(client =>
+            client.info({})
+        );
 
-        return networkInspection?.IPAM?.Config?.[0].Gateway;
+        if (/Docker Desktop/i.test(dockerInfo.operatingSystem)) {
+            return 'localhost';
+        }
+
+        // For other Docker setups on WSL or Linux, 'host.docker.internal' doesn't work, so we ask debugpy to listen
+        // on the bridge network's ip address (predefined network).
+        const networkInspection = (await ext.runWithDefaults(client =>
+            client.inspectNetworks({ networks: ['bridge'] })
+        ))?.[0];
+
+        return networkInspection?.ipam?.config?.[0].gateway;
     }
 }
 

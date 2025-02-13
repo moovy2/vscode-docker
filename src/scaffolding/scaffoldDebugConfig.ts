@@ -3,9 +3,8 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { AzureWizard, AzureWizardPromptStep, UserCancelledError } from '@microsoft/vscode-azext-utils';
 import * as vscode from 'vscode';
-import { AzureWizard, AzureWizardPromptStep, UserCancelledError } from 'vscode-azureextensionui';
-import { localize } from '../localize';
 import { copyWizardContext } from './copyWizardContext';
 import { ChoosePlatformStep } from './wizard/ChoosePlatformStep';
 import { ChooseWorkspaceFolderStep } from './wizard/ChooseWorkspaceFolderStep';
@@ -21,12 +20,12 @@ export async function scaffoldDebugConfig(wizardContext: Partial<ScaffoldingWiza
 
     const promptSteps: AzureWizardPromptStep<ScaffoldingWizardContext>[] = [
         new ChooseWorkspaceFolderStep(),
-        new ChoosePlatformStep(['Node.js', '.NET: ASP.NET Core', '.NET: Core Console', 'Python: Django', 'Python: FastAPI', 'Python: Flask', 'Python: General']),
+        new ChoosePlatformStep(['Node.js', '.NET: ASP.NET Core', '.NET: Console', 'Python: Django', 'Python: FastAPI', 'Python: Flask', 'Python: General']),
     ];
 
     const wizard = new AzureWizard<ScaffoldingWizardContext>(wizardContext as ScaffoldingWizardContext, {
         promptSteps: promptSteps,
-        title: localize('vscode-docker.scaffold.addDockerFiles', 'Initialize for Debugging'),
+        title: vscode.l10n.t('Initialize for Debugging'),
     });
 
     await wizard.prompt();

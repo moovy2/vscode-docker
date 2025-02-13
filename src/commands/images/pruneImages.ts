@@ -3,27 +3,32 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { IActionContext } from '@microsoft/vscode-azext-utils';
 import * as vscode from 'vscode';
-import { IActionContext } from 'vscode-azureextensionui';
 import { ext } from '../../extensionVariables';
-import { localize } from '../../localize';
 import { convertToMB } from '../../utils/convertToMB';
 
 export async function pruneImages(context: IActionContext): Promise<void> {
-    const confirmPrune: string = localize('vscode-docker.commands.images.prune.confirm', 'Are you sure you want to remove all dangling images?');
+    const confirmPrune: string = vscode.l10n.t('Are you sure you want to remove all dangling images?');
     // no need to check result - cancel will throw a UserCancelledError
-    await context.ui.showWarningMessage(confirmPrune, { modal: true }, { title: localize('vscode-docker.commands.images.prune.remove', 'Remove') });
+    await context.ui.showWarningMessage(confirmPrune, { modal: true }, { title: vscode.l10n.t('Remove') });
 
     await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: localize('vscode-docker.commands.images.pruning', 'Pruning images...') },
+        { location: vscode.ProgressLocation.Notification, title: vscode.l10n.t('Pruning images...') },
         async () => {
-            const result = await ext.dockerClient.pruneImages(context);
+            const result = await ext.runWithDefaults(client =>
+                client.pruneImages({})
+            );
 
-            const mbReclaimed = convertToMB(result.SpaceReclaimed);
-            const message = localize('vscode-docker.commands.images.prune.removed', 'Removed {0} image(s) and reclaimed {1} MB of space.', result.ObjectsDeleted, mbReclaimed);
-            // don't wait
-            /* eslint-disable-next-line @typescript-eslint/no-floating-promises */
-            vscode.window.showInformationMessage(message);
+            let message: string;
+            if (result?.imageRefsDeleted?.length && Number.isInteger(result?.spaceReclaimed)) {
+                message = vscode.l10n.t('Removed {0} dangling image(s) and reclaimed {1} MB of space.', result.imageRefsDeleted.length, convertToMB(result.spaceReclaimed));
+            } else {
+                message = vscode.l10n.t('Removed dangling images.');
+            }
+
+            // Don't wait
+            void vscode.window.showInformationMessage(message);
         }
     );
 }

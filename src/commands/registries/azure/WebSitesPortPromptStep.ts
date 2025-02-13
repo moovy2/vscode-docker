@@ -3,14 +3,14 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { AzureWizardPromptStep } from "vscode-azureextensionui";
-import { localize } from '../../../localize';
+import { AzureWizardPromptStep } from "@microsoft/vscode-azext-utils";
+import { l10n } from 'vscode';
 import { IAppServiceContainerWizardContext } from './deployImageToAzure';
 
 export class WebSitesPortPromptStep extends AzureWizardPromptStep<IAppServiceContainerWizardContext> {
 
     public async prompt(context: IAppServiceContainerWizardContext): Promise<void> {
-        const prompt: string = localize('vscode-docker.deployAppService.WebSitesPortPromptStep.whatPort', 'What port does your app listen on?');
+        const prompt: string = l10n.t('What port does your app listen on?');
         const placeHolder: string = '80';
         const value: string = '80';
         const portString: string = await context.ui.showInputBox({ prompt, placeHolder, value, validateInput });
@@ -30,6 +30,6 @@ function validateInput(value: string | undefined): string | undefined {
         }
     }
 
-    return localize('vscode-docker.deployAppService.WebSitesPortPromptStep.InvalidPort', 'Port must be a positive integer (1 to 65535).');
+    return l10n.t('Port must be a positive integer (1 to 65535).');
 }
 

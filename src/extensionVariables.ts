@@ -3,17 +3,21 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ExtensionContext, TreeView } from "vscode";
-import { AzExtTreeDataProvider, AzExtTreeItem, IAzExtOutputChannel, IExperimentationServiceAdapter } from "vscode-azureextensionui";
-import { ContextManager } from './docker/ContextManager';
-import { DockerApiClient } from './docker/DockerApiClient';
+import { AzExtTreeDataProvider, AzExtTreeItem, IExperimentationServiceAdapter } from '@microsoft/vscode-azext-utils';
+import { DockerHubRegistryDataProvider, GenericRegistryV2DataProvider, GitHubRegistryDataProvider } from '@microsoft/vscode-docker-registries';
+import { ExtensionContext, StatusBarItem, TreeView } from 'vscode';
+import { ContainerRuntimeManager } from './runtimes/ContainerRuntimeManager';
+import { OrchestratorRuntimeManager } from './runtimes/OrchestratorRuntimeManager';
+import { runWithDefaults as runWithDefaultsImpl, streamWithDefaults as streamWithDefaultsImpl } from './runtimes/runners/runWithDefaults';
 import { IActivityMeasurementService } from './telemetry/ActivityMeasurementService';
 import { ContainersTreeItem } from './tree/containers/ContainersTreeItem';
 import { ContextsTreeItem } from './tree/contexts/ContextsTreeItem';
 import { ImagesTreeItem } from './tree/images/ImagesTreeItem';
 import { NetworksTreeItem } from './tree/networks/NetworksTreeItem';
-import { RegistriesTreeItem } from './tree/registries/RegistriesTreeItem';
+import { AzureRegistryDataProvider } from './tree/registries/Azure/AzureRegistryDataProvider';
+import { UnifiedRegistryItem, UnifiedRegistryTreeDataProvider } from './tree/registries/UnifiedRegistryTreeDataProvider';
 import { VolumesTreeItem } from './tree/volumes/VolumesTreeItem';
+import { AzExtLogOutputChannelWrapper } from './utils/AzExtLogOutputChannelWrapper';
 
 /**
  * Namespace for common variables used throughout the extension. They must be initialized in the activate() method of extension.ts
@@ -21,13 +25,11 @@ import { VolumesTreeItem } from './tree/volumes/VolumesTreeItem';
 // eslint-disable-next-line @typescript-eslint/no-namespace
 export namespace ext {
     export let context: ExtensionContext;
-    export let outputChannel: IAzExtOutputChannel;
+    export let outputChannel: AzExtLogOutputChannelWrapper;
 
     export let experimentationService: IExperimentationServiceAdapter;
     export let activityMeasurementService: IActivityMeasurementService;
 
-    export let dockerContextManager: ContextManager;
-    export let dockerClient: DockerApiClient;
     export let treeInitError: unknown;
     export const ignoreBundle = !/^(false|0)?$/i.test(process.env.AZCODE_DOCKER_IGNORE_BUNDLE || '');
 
@@ -45,9 +47,13 @@ export namespace ext {
 
     export const prefix: string = 'docker';
 
-    export let registriesTree: AzExtTreeDataProvider;
-    export let registriesTreeView: TreeView<AzExtTreeItem>;
-    export let registriesRoot: RegistriesTreeItem;
+    export let registriesTree: UnifiedRegistryTreeDataProvider;
+    export let registriesTreeView: TreeView<UnifiedRegistryItem<unknown>>;
+    export let registriesRoot: UnifiedRegistryTreeDataProvider;
+    export let genericRegistryV2DataProvider: GenericRegistryV2DataProvider;
+    export let azureRegistryDataProvider: AzureRegistryDataProvider;
+    export let dockerHubRegistryDataProvider: DockerHubRegistryDataProvider;
+    export let githubRegistryDataProvider: GitHubRegistryDataProvider;
 
     export let volumesTree: AzExtTreeDataProvider;
     export let volumesTreeView: TreeView<AzExtTreeItem>;
@@ -56,4 +62,12 @@ export namespace ext {
     export let contextsTree: AzExtTreeDataProvider;
     export let contextsTreeView: TreeView<AzExtTreeItem>;
     export let contextsRoot: ContextsTreeItem;
+
+    // Container runtime related items
+    export let runtimeManager: ContainerRuntimeManager;
+    export let orchestratorManager: OrchestratorRuntimeManager;
+    export const runWithDefaults = runWithDefaultsImpl;
+    export const streamWithDefaults = streamWithDefaultsImpl;
+
+    export let dockerContextStatusBarItem: StatusBarItem;
 }

@@ -3,9 +3,9 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IActionContext, openReadOnlyJson } from "vscode-azureextensionui";
+import { IActionContext, openReadOnlyJson } from "@microsoft/vscode-azext-utils";
+import { l10n } from 'vscode';
 import { ext } from "../../extensionVariables";
-import { localize } from '../../localize';
 import { ImageTreeItem } from "../../tree/images/ImageTreeItem";
 
 export async function inspectImage(context: IActionContext, node?: ImageTreeItem): Promise<void> {
@@ -13,10 +13,12 @@ export async function inspectImage(context: IActionContext, node?: ImageTreeItem
         await ext.imagesTree.refresh(context);
         node = await ext.imagesTree.showTreeItemPicker<ImageTreeItem>(ImageTreeItem.contextValue, {
             ...context,
-            noItemFoundErrorMessage: localize('vscode-docker.commands.images.inspect.noImages', 'No images are available to inspect')
+            noItemFoundErrorMessage: l10n.t('No images are available to inspect')
         });
     }
 
-    const inspectInfo = await ext.dockerClient.inspectImage(context, node.imageId);
-    await openReadOnlyJson(node, inspectInfo);
+    const inspectResult = await ext.runWithDefaults(client =>
+        client.inspectImages({ imageRefs: [node.imageId] })
+    );
+    await openReadOnlyJson(node, JSON.parse(inspectResult[0].raw));
 }

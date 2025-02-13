@@ -3,9 +3,9 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { IActionContext } from 'vscode-azureextensionui';
+import { IActionContext } from '@microsoft/vscode-azext-utils';
+import { l10n } from 'vscode';
 import { ext } from '../../extensionVariables';
-import { localize } from '../../localize';
 import { ContainerTreeItem } from '../../tree/containers/ContainerTreeItem';
 
 export async function selectContainer(context: IActionContext): Promise<string> {
@@ -14,7 +14,7 @@ export async function selectContainer(context: IActionContext): Promise<string> 
 
     const node: ContainerTreeItem = await ext.containersTree.showTreeItemPicker(ContainerTreeItem.runningContainerRegExp, {
         ...context,
-        noItemFoundErrorMessage: localize('vscode-docker.commands.containers.select.noContainers', 'No running containers are available')
+        noItemFoundErrorMessage: l10n.t('No running containers are available')
     });
 
     return node.containerId;

@@ -3,14 +3,13 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { AzExtParentTreeItem, AzExtTreeItem, IActionContext } from "@microsoft/vscode-azext-utils";
+import { ContainerOS, ListFilesItem } from '@microsoft/vscode-container-client';
 import * as vscode from 'vscode';
-import { AzExtParentTreeItem, AzExtTreeItem, IActionContext } from "vscode-azureextensionui";
-import { DockerOSType } from '../../../docker/Common';
-import { DirectoryItem, UnrecognizedDirectoryItemTypeError } from "../../../docker/files/ContainerFilesUtils";
-import { DockerUri } from '../../../docker/files/DockerUri';
+import { DockerUri } from '../../../runtimes/files/DockerUri';
 import { FileTreeItem } from "./FileTreeItem";
 
-export type DirectoryItemProvider = (path: string | undefined) => Promise<DirectoryItem[]>;
+export type DirectoryItemProvider = (path: string | undefined) => Promise<ListFilesItem[]>;
 
 export class DirectoryTreeItem extends AzExtParentTreeItem {
     private children: AzExtTreeItem[] | undefined;
@@ -20,7 +19,7 @@ export class DirectoryTreeItem extends AzExtParentTreeItem {
         private readonly fs: vscode.FileSystem,
         private readonly name: string,
         private readonly uri: DockerUri,
-        private readonly containerOSProvider: (context: IActionContext) => Promise<DockerOSType>) {
+        private readonly containerOSProvider: (context: IActionContext) => Promise<ContainerOS>) {
         super(parent);
     }
 
@@ -30,12 +29,6 @@ export class DirectoryTreeItem extends AzExtParentTreeItem {
 
     public hasMoreChildrenImpl(): boolean {
         return !!this.children;
-    }
-
-    public get iconPath(): vscode.ThemeIcon {
-        return (this as vscode.TreeItem).collapsibleState === vscode.TreeItemCollapsibleState.Expanded
-            ? new vscode.ThemeIcon('folder-opened')
-            : new vscode.ThemeIcon('folder');
     }
 
     public async loadMoreChildrenImpl(clearCache: boolean, context: IActionContext): Promise<AzExtTreeItem[]> {
@@ -77,10 +70,10 @@ export class DirectoryTreeItem extends AzExtParentTreeItem {
 
             case vscode.FileType.File:
 
-                return new FileTreeItem(this, name, itemUri.with({ fileType: 'file' }));
+                return new FileTreeItem(this, name, itemUri.with({ fileType: vscode.FileType.File }));
 
             default:
-                throw new UnrecognizedDirectoryItemTypeError();
+                throw new Error(vscode.l10n.t('Unrecognized directory item type.'));
         }
     }
 

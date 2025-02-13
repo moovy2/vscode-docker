@@ -3,27 +3,32 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { IActionContext } from '@microsoft/vscode-azext-utils';
 import * as vscode from 'vscode';
-import { IActionContext } from 'vscode-azureextensionui';
 import { ext } from '../../extensionVariables';
-import { localize } from '../../localize';
 import { convertToMB } from '../../utils/convertToMB';
 
 export async function pruneContainers(context: IActionContext): Promise<void> {
-    const confirmPrune: string = localize('vscode-docker.commands.containers.prune.confirm', 'Are you sure you want to remove all stopped containers?');
+    const confirmPrune: string = vscode.l10n.t('Are you sure you want to remove all stopped containers?');
     // no need to check result - cancel will throw a UserCancelledError
-    await context.ui.showWarningMessage(confirmPrune, { modal: true }, { title: localize('vscode-docker.commands.containers.prune.remove', 'Remove') });
+    await context.ui.showWarningMessage(confirmPrune, { modal: true }, { title: vscode.l10n.t('Remove') });
 
     await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: localize('vscode-docker.commands.containers.pruning', 'Pruning containers...') },
+        { location: vscode.ProgressLocation.Notification, title: vscode.l10n.t('Pruning containers...') },
         async () => {
-            const result = await ext.dockerClient.pruneContainers(context);
+            const result = await ext.runWithDefaults(client =>
+                client.pruneContainers({})
+            );
 
-            const mbReclaimed = convertToMB(result.SpaceReclaimed);
-            const message = localize('vscode-docker.commands.containers.prune.removed', 'Removed {0} container(s) and reclaimed {1} MB of space.', result.ObjectsDeleted, mbReclaimed);
-            // don't wait
-            /* eslint-disable-next-line @typescript-eslint/no-floating-promises */
-            vscode.window.showInformationMessage(message);
+            let message: string;
+            if (result?.containersDeleted?.length && Number.isInteger(result?.spaceReclaimed)) {
+                message = vscode.l10n.t('Removed {0} stopped container(s) and reclaimed {1} MB of space.', result.containersDeleted.length, convertToMB(result.spaceReclaimed));
+            } else {
+                message = vscode.l10n.t('Removed stopped containers.');
+            }
+
+            // Don't wait
+            void vscode.window.showInformationMessage(message);
         }
     );
 }

@@ -3,12 +3,14 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { ImageNameInfo } from '@microsoft/vscode-container-client';
 import { URL } from 'url';
 import { ociClientId } from '../../../constants';
-import { bearerAuthHeader, getWwwAuthenticateContext, HttpErrorResponse, httpRequest, IOAuthContext, RequestLike, RequestOptionsLike } from '../../../utils/httpRequest';
+import { HttpErrorResponse, IOAuthContext, RequestLike, RequestOptionsLike, bearerAuthHeader, getWwwAuthenticateContext, httpRequest } from '../../../utils/httpRequest';
+import { NormalizedImageNameInfo } from '../NormalizedImageNameInfo';
 
 export interface ImageRegistry {
-    registryMatch: RegExp;
+    isMatch: (imageNameInfo: ImageNameInfo) => boolean;
     baseUrl: string;
     signRequest?(request: RequestLike, scope: string): Promise<RequestLike>;
 }
@@ -17,13 +19,17 @@ let dockerHubAuthContext: IOAuthContext | undefined;
 
 export const registries: ImageRegistry[] = [
     {
-        registryMatch: /docker[.]io\/library/i,
+        isMatch: (imageNameInfo: ImageNameInfo): boolean => {
+            const normalizedImageNameInfo = new NormalizedImageNameInfo(imageNameInfo);
+            return !!imageNameInfo.originalName && normalizedImageNameInfo.normalizedRegistry === 'docker.io' && normalizedImageNameInfo.normalizedNamespace === 'library';
+        },
         baseUrl: 'https://registry-1.docker.io/v2/library',
         signRequest: async (request: RequestLike, scope: string): Promise<RequestLike> => {
             if (!dockerHubAuthContext) {
                 try {
                     const options: RequestOptionsLike = {
                         headers: {
+                            // eslint-disable-next-line @typescript-eslint/naming-convention
                             'X-Meta-Source-Client': ociClientId,
                         },
                     };
@@ -41,6 +47,7 @@ export const registries: ImageRegistry[] = [
             const authRequestOptions: RequestOptionsLike = {
                 method: 'GET',
                 headers: {
+                    // eslint-disable-next-line @typescript-eslint/naming-convention
                     'X-Meta-Source-Client': ociClientId,
                     service: dockerHubAuthContext.service,
                     scope: scope,
@@ -59,7 +66,9 @@ export const registries: ImageRegistry[] = [
         }
     },
     {
-        registryMatch: /mcr[.]microsoft[.]com/i,
+        isMatch: (imageNameInfo: ImageNameInfo): boolean => {
+            return !!imageNameInfo.originalName && imageNameInfo.registry === 'mcr.microsoft.com';
+        },
         baseUrl: 'https://mcr.microsoft.com/v2',
     }
 ];

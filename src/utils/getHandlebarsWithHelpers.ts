@@ -11,11 +11,12 @@ import { DockerExtensionKind, getVSCodeRemoteInfo } from './getVSCodeRemoteInfo'
 import { isWindows } from './osUtils';
 import { pathNormalize } from './pathNormalize';
 import { PlatformOS } from './platform';
+import { getHandlebars } from './lazyPackages';
 
-let handlebars: typeof Handlebars | undefined;
+let handlebars: typeof import('handlebars') | undefined;
 export async function getHandlebarsWithHelpers(): Promise<typeof Handlebars> {
     if (!handlebars) {
-        handlebars = await import('handlebars');
+        handlebars = await getHandlebars();
 
         handlebars.registerHelper('workspaceRelative', (wizardContext: ScaffoldingWizardContext, absolutePath: string, platform: PlatformOS = 'Linux') => {
             const workspaceFolder: vscode.WorkspaceFolder = wizardContext.workspaceFolder;
@@ -99,6 +100,10 @@ export async function getHandlebarsWithHelpers(): Promise<typeof Handlebars> {
 
         handlebars.registerHelper('nonEmptyObj', (obj: unknown | undefined) => {
             return obj && Object.keys(obj).length !== 0;
+        });
+
+        handlebars.registerHelper('nonEmptyArr', (arr: unknown | undefined) => {
+            return arr && Array.isArray(arr) && arr.length > 0;
         });
     }
 

@@ -11,7 +11,7 @@ import { DockerBuildOptions } from "../DockerBuildTaskDefinitionBase";
 import { DockerBuildTaskDefinition } from "../DockerBuildTaskProvider";
 import { DockerContainerVolume, DockerRunOptions, DockerRunTaskDefinitionBase } from "../DockerRunTaskDefinitionBase";
 import { DockerRunTaskDefinition } from "../DockerRunTaskProvider";
-import { addVolumeWithoutConflicts, DockerBuildTaskContext, DockerRunTaskContext, DockerTaskScaffoldContext, getDefaultContainerName, getDefaultImageName, inferImageName, TaskHelper } from "../TaskHelper";
+import { DockerBuildTaskContext, DockerRunTaskContext, DockerTaskScaffoldContext, TaskHelper, addVolumeWithoutConflicts, getDefaultContainerName, getDefaultImageName, inferImageName } from "../TaskHelper";
 import { PythonExtensionHelper } from "./PythonExtensionHelper";
 
 export interface PythonTaskRunOptions {
@@ -69,7 +69,13 @@ export class PythonTaskHelper implements TaskHelper {
             runOptions.module = 'flask';
             runOptions.file = undefined;
         } else if (options.projectType === 'fastapi') {
-            runOptions.args.unshift(`${path.basename(runOptions.file, '.py')}:app`);
+            const basename = path.basename(runOptions.file, '.py');
+            const dirname = path.dirname(runOptions.file).replace(path.sep, '.');
+            if (dirname !== '.') {
+                runOptions.args.unshift(`${dirname}.${basename}:app`);
+            } else {
+                runOptions.args.unshift(`${basename}:app`);
+            }
             runOptions.module = 'uvicorn';
             runOptions.file = undefined;
         }
@@ -119,14 +125,14 @@ export class PythonTaskHelper implements TaskHelper {
 
     private inferVolumes(runOptions: DockerRunOptions, launcherFolder: string): DockerContainerVolume[] {
         if (!launcherFolder) {
-            return;
+            return [];
         }
 
         const volumes = runOptions?.volumes ? [...runOptions.volumes] : [];
         const dbgVolume: DockerContainerVolume = {
             localPath: launcherFolder,
             containerPath: '/debugpy',
-            permissions: 'ro,z'
+            permissions: 'ro'
         };
 
         addVolumeWithoutConflicts(volumes, dbgVolume);

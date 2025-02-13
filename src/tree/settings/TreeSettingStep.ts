@@ -3,9 +3,8 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { AzureWizardPromptStep, IAzureQuickPickItem, IAzureQuickPickOptions } from "vscode-azureextensionui";
-import { localize } from "../../localize";
-import { nonNullProp } from "../../utils/nonNull";
+import { AzureWizardPromptStep, IAzureQuickPickItem, IAzureQuickPickOptions, nonNullProp } from "@microsoft/vscode-azext-utils";
+import { l10n } from 'vscode';
 import { ITreePropertyInfo } from "./ITreeSettingInfo";
 import { ITreeSettingsWizardContext } from "./ITreeSettingsWizardContext";
 
@@ -43,7 +42,7 @@ function convertPropertyInfoToPick(info: ITreePropertyInfo<string>): IAzureQuick
     let detail: string | undefined;
 
     if (info.exampleValue) {
-        description = localize('vscode-docker.tree.settings.setting.description', 'e.g. "{0}"', info.exampleValue);
+        description = l10n.t('e.g. "{0}"', info.exampleValue);
         detail = info.description;
     } else {
         description = info.description;

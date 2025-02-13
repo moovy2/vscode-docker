@@ -3,9 +3,8 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { MessageItem, window } from 'vscode';
-import { DialogResponses } from 'vscode-azureextensionui';
-import { localize } from '../localize';
+import { DialogResponses } from '@microsoft/vscode-azext-utils';
+import { l10n, MessageItem, window } from 'vscode';
 import { DockerBuildTaskDefinition } from '../tasks/DockerBuildTaskProvider';
 import { DockerRunTaskDefinition } from '../tasks/DockerRunTaskProvider';
 import { netCoreTaskHelper, NetCoreTaskScaffoldingOptions } from '../tasks/netcore/NetCoreTaskHelper';
@@ -100,7 +99,7 @@ export class DockerDebugScaffoldingProvider implements IDockerDebugScaffoldingPr
                 title: 'Overwrite'
             };
 
-            overwrite = (overwriteMessageItem === await window.showWarningMessage(localize('vscode-docker.debug.scaffoldProvider.confirm', 'Docker launch configurations and/or tasks already exist. Do you want to overwrite them?'), ...[overwriteMessageItem, DialogResponses.no]));
+            overwrite = (overwriteMessageItem === await window.showWarningMessage(l10n.t('Docker launch configurations and/or tasks already exist. Do you want to overwrite them?'), ...[overwriteMessageItem, DialogResponses.no]));
 
             if (overwrite) {
                 // Try again if needed

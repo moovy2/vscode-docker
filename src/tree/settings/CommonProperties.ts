@@ -5,9 +5,8 @@
 
 import * as dayjs from 'dayjs';
 import * as relativeTime from 'dayjs/plugin/relativeTime';
-import { ThemeIcon } from 'vscode';
-import { DockerObject } from '../../docker/Common';
-import { localize } from '../../localize';
+import { l10n, ThemeIcon } from 'vscode';
+import { convertToMB } from '../../utils/convertToMB';
 import { ITreePropertyInfo } from './ITreeSettingInfo';
 
 dayjs.extend(relativeTime);
@@ -16,30 +15,28 @@ export type CommonProperty = 'CreatedTime' | 'Size';
 export type CommonGroupBy = 'None';
 export type CommonSortBy = 'CreatedTime' | 'Label' | 'Size';
 
-export const commonProperties: ITreePropertyInfo<CommonProperty>[] = [
+export const commonProperties: ITreePropertyInfo<Exclude<CommonProperty, 'Size'>>[] = [
     { property: 'CreatedTime', exampleValue: '2 hours ago' },
 ];
 
 export const groupByNoneProperty: ITreePropertyInfo<CommonGroupBy> = {
     property: 'None',
-    description: localize('vscode-docker.tree.settings.none', 'No grouping')
+    description: l10n.t('No grouping')
 };
 
 export const sortByProperties: ITreePropertyInfo<CommonSortBy>[] = [
-    { property: 'CreatedTime', description: localize('vscode-docker.tree.settings.createdTime', 'Sort by newest') },
-    { property: 'Label', description: localize('vscode-docker.tree.settings.label', 'Sort alphabetically by label') }
+    { property: 'CreatedTime', description: l10n.t('Sort by newest') },
+    { property: 'Label', description: l10n.t('Sort alphabetically by label') }
 ];
 
-export function getCommonPropertyValue(item: DockerObject, property: CommonProperty): string {
+export function getCommonPropertyValue(item: { createdAt?: Date, size?: number }, property: CommonProperty): string {
     switch (property) {
         case 'CreatedTime':
-            return dayjs(item.CreatedTime).fromNow();
+            return !!(item?.createdAt) ? dayjs(item.createdAt).fromNow() : '';
         case 'Size':
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any, no-case-declarations
-            const size: number = (item as any).Size ?? 0;
-            return `${Math.round(size / (1024 * 1024))} MB`;
+            return Number.isInteger(item?.size) ? `${convertToMB(item.size)} MB` : '';
         default:
-            throw new RangeError(localize('vscode-docker.tree.settings.unexpected1', 'Unexpected property "{0}".', property));
+            throw new RangeError(l10n.t('Unexpected property "{0}".', property));
     }
 }
 
@@ -50,7 +47,7 @@ export function getCommonGroupIcon(property: CommonProperty | CommonGroupBy): Th
             icon = 'watch';
             break;
         default:
-            throw new RangeError(localize('vscode-docker.tree.settings.unexpected2', 'Unexpected property "{0}".', property));
+            throw new RangeError(l10n.t('Unexpected property "{0}".', property));
     }
 
     return new ThemeIcon(icon);

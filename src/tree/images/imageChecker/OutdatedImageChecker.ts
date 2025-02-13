@@ -3,17 +3,14 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { IActionContext, callWithTelemetryAndErrorHandling } from '@microsoft/vscode-azext-utils';
+import { ListImagesItem } from '@microsoft/vscode-container-client';
 import * as vscode from 'vscode';
-import { callWithTelemetryAndErrorHandling, IActionContext } from 'vscode-azureextensionui';
 import { ociClientId } from '../../../constants';
-import { DockerImage } from '../../../docker/Images';
 import { ext } from '../../../extensionVariables';
-import { httpRequest, RequestOptionsLike } from '../../../utils/httpRequest';
-import { getImagePropertyValue } from '../ImageProperties';
+import { RequestOptionsLike, httpRequest } from '../../../utils/httpRequest';
 import { DatedDockerImage } from '../ImagesTreeItem';
 import { ImageRegistry, registries } from './registries';
-
-const noneRegex = /<none>/i;
 
 export class OutdatedImageChecker {
     private shouldLoad: boolean;
@@ -27,8 +24,9 @@ export class OutdatedImageChecker {
         this.defaultRequestOptions = {
             method: 'HEAD',
             headers: {
+                // eslint-disable-next-line @typescript-eslint/naming-convention
                 'X-Meta-Source-Client': ociClientId,
-                'Accept': 'application/vnd.docker.distribution.manifest.list.v2+json',
+                'Accept': 'application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json',
             },
         };
     }
@@ -49,13 +47,13 @@ export class OutdatedImageChecker {
                 const imageCheckPromises: Promise<void>[] = [];
 
                 for (const image of images) {
-                    const imageRegistry = getImagePropertyValue(image, 'Registry');
-                    const matchingRegistry = registries.find(r => r.registryMatch.test(imageRegistry));
+                    // See if it matches a registry we can check
+                    const matchingRegistry = registries.find(r => r.isMatch(image.image));
 
                     if (matchingRegistry) {
                         imageCheckPromises.push((async () => {
                             if (await this.checkImage(context, matchingRegistry, image) === 'outdated') {
-                                this.outdatedImageIds.push(image.Id);
+                                this.outdatedImageIds.push(image.id);
                             }
                         })());
                     }
@@ -74,30 +72,30 @@ export class OutdatedImageChecker {
         }
 
         for (const image of images) {
-            image.Outdated = this.outdatedImageIds.some(i => i.toLowerCase() === image.Id.toLowerCase());
+            image.outdated = this.outdatedImageIds.some(i => i.toLowerCase() === image.id.toLowerCase());
         }
     }
 
-    private async checkImage(context: IActionContext, registry: ImageRegistry, image: DockerImage): Promise<'latest' | 'outdated' | 'unknown'> {
+    private async checkImage(context: IActionContext, registry: ImageRegistry, image: ListImagesItem): Promise<'latest' | 'outdated' | 'unknown'> {
         try {
-            const [registryAndRepo, tag] = image.Name.split(':');
-            // Remove the registry and leading/trailing slashes from the registryAndRepo to get the repo
-            const repo = registryAndRepo.replace(registry.registryMatch, '').replace(/^\/|\/$/, '');
+            const imageNameInfo = image.image;
 
-            if (noneRegex.test(repo) || noneRegex.test(tag)) {
+            if (!imageNameInfo.image || !imageNameInfo.tag) {
                 return 'unknown';
             }
 
             // 0. If there's a method to sign the request, it will be called on the registry
             // 1. Get the latest image digest ID from the manifest
-            const latestImageDigest = await this.getLatestImageDigest(registry, repo, tag);
+            const latestImageDigest = await this.getLatestImageDigest(registry, imageNameInfo.image, imageNameInfo.tag);
 
             // 2. Compare it with the current image's value
-            const imageInspectInfo = await ext.dockerClient.inspectImage(context, image.Id);
+            const imageInspectInfo = (await ext.runWithDefaults(client =>
+                client.inspectImages({ imageRefs: [image.id] })
+            ))?.[0];
 
             // 3. If some local digest matches the most up-to-date digest, then what we have is up-to-date
             //    The logic is reversed so that if something goes wrong, we will err toward calling it up-to-date
-            if (imageInspectInfo?.RepoDigests?.every(digest => digest?.toLowerCase()?.indexOf(latestImageDigest.toLowerCase()) < 0)) {
+            if (imageInspectInfo?.repoDigests?.every(digest => digest?.toLowerCase()?.indexOf(latestImageDigest.toLowerCase()) < 0)) {
                 return 'outdated';
             }
 

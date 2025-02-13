@@ -3,16 +3,16 @@
  *  Licensed under the MIT License. See LICENSE.md in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { parseError } from '@microsoft/vscode-azext-utils';
+import { normalizeContainerOS } from '@microsoft/vscode-container-client';
 import * as fse from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
-import { WorkspaceFolder } from 'vscode';
-import { parseError } from 'vscode-azureextensionui';
+import { WorkspaceFolder, l10n } from 'vscode';
 import { getContainerSecretsFolders, getHostSecretsFolders } from '../../debugging/netcore/AspNetSslHelper';
 import { NetCoreDebugOptions } from '../../debugging/netcore/NetCoreDebugHelper';
 import { vsDbgInstallBasePath } from '../../debugging/netcore/VsDbgHelper';
 import { ext } from '../../extensionVariables';
-import { localize } from '../../localize';
 import { PlatformOS } from '../../utils/platform';
 import { quickPickProjectFileItem } from '../../utils/quickPickFile';
 import { resolveVariables, unresolveWorkspaceFolder } from '../../utils/resolveVariables';
@@ -20,7 +20,7 @@ import { DockerBuildOptions, DockerBuildTaskDefinitionBase } from '../DockerBuil
 import { DockerBuildTaskDefinition } from '../DockerBuildTaskProvider';
 import { DockerContainerVolume, DockerRunOptions, DockerRunTaskDefinitionBase } from '../DockerRunTaskDefinitionBase';
 import { DockerRunTaskDefinition } from '../DockerRunTaskProvider';
-import { addVolumeWithoutConflicts, DockerBuildTaskContext, DockerRunTaskContext, DockerTaskContext, DockerTaskScaffoldContext, getDefaultContainerName, getDefaultImageName, inferImageName, TaskHelper } from '../TaskHelper';
+import { DockerBuildTaskContext, DockerRunTaskContext, DockerTaskContext, DockerTaskScaffoldContext, TaskHelper, addVolumeWithoutConflicts, getDefaultContainerName, getDefaultImageName, inferImageName } from '../TaskHelper';
 import { updateBlazorManifest } from './updateBlazorManifest';
 
 export interface NetCoreTaskOptions {
@@ -75,6 +75,10 @@ export class NetCoreTaskHelper implements TaskHelper {
                     dockerfile: unresolveWorkspaceFolder(context.dockerfile, context.folder),
                     /* eslint-disable-next-line no-template-curly-in-string */
                     context: '${workspaceFolder}',
+                    platform: {
+                        os: normalizeContainerOS(options?.platformOS),
+                        architecture: 'amd64'
+                    },
                     pull: true
                 },
                 netCore: {
@@ -141,6 +145,9 @@ export class NetCoreTaskHelper implements TaskHelper {
         runOptions.containerName = runOptions.containerName || getDefaultContainerName(context.folder.name);
         runOptions.os = runOptions.os || 'Linux';
         runOptions.image = inferImageName(runDefinition as DockerRunTaskDefinition, context, context.folder.name, 'dev');
+        if (helperOptions.enableDebugging) {
+            runOptions.entrypoint ??= runOptions.os === 'Windows' ? 'cmd.exe' : '/bin/sh';
+        }
 
         const ssl = !!helperOptions.configureSsl; // SSL will be enabled only if helperOptions.configureSsl is explicitly true
         context.actionContext.telemetry.properties.netCoreSslSetting = helperOptions.configureSsl === undefined ? 'undefined' : helperOptions.configureSsl.toString();
@@ -162,7 +169,7 @@ export class NetCoreTaskHelper implements TaskHelper {
                 await updateBlazorManifest(context, runDefinition);
             }
         } catch (err) {
-            context.terminal.writeWarningLine(localize('vscode-docker.tasks.netCore.failedBlazorUpdate', 'Failed to update Blazor static web assets manifest. Static web assets may not work.\nThe error was: {0}', parseError(err).message));
+            context.terminal.writeWarningLine(l10n.t('Failed to update Blazor static web assets manifest. Static web assets may not work.\nThe error was: {0}', parseError(err).message));
         }
     }
 
@@ -173,7 +180,7 @@ export class NetCoreTaskHelper implements TaskHelper {
             result = resolveVariables(helperOptions.appProject, context.folder);
         } else {
             // Find a .csproj or .fsproj in the folder
-            const item = await quickPickProjectFileItem(context.actionContext, undefined, context.folder, localize('vscode-docker.tasks.netCore.noCsproj', 'No .NET Core project file (.csproj or .fsproj) could be found.'));
+            const item = await quickPickProjectFileItem(context.actionContext, undefined, context.folder, l10n.t('No .NET project file (.csproj or .fsproj) could be found.'));
             result = item.absoluteFilePath;
         }
 
@@ -188,7 +195,9 @@ export class NetCoreTaskHelper implements TaskHelper {
 
     private async inferUserSecrets(helperOptions: NetCoreTaskOptions): Promise<boolean> {
         const contents = await fse.readFile(helperOptions.appProject);
-        return UserSecretsRegex.test(contents.toString());
+        // Remove comments so we don't match a commented tag
+        const noComments = contents.toString().replace(/<!--.*?-->/gs, "");
+        return UserSecretsRegex.test(noComments);
     }
 
     private async inferVolumes(folder: WorkspaceFolder, runOptions: DockerRunOptions, helperOptions: NetCoreTaskOptions, ssl: boolean, userSecrets: boolean): Promise<DockerContainerVolume[]> {
@@ -204,46 +213,61 @@ export class NetCoreTaskHelper implements TaskHelper {
             const appVolume: DockerContainerVolume = {
                 localPath: path.dirname(helperOptions.appProject),
                 containerPath: runOptions.os === 'Windows' ? 'C:\\app' : '/app',
-                permissions: 'rw,z'
+                permissions: 'rw'
             };
 
             const srcVolume: DockerContainerVolume = {
                 localPath: folder.uri.fsPath,
                 containerPath: runOptions.os === 'Windows' ? 'C:\\src' : '/src',
-                permissions: 'rw,z'
+                permissions: 'rw'
             };
 
             const debuggerVolume: DockerContainerVolume = {
                 localPath: vsDbgInstallBasePath,
                 containerPath: runOptions.os === 'Windows' ? 'C:\\remote_debugger' : '/remote_debugger',
-                permissions: 'ro,z'
+                permissions: 'ro'
             };
 
             const nugetRootVolume: DockerContainerVolume = {
                 localPath: path.join(os.homedir(), '.nuget', 'packages'),
                 containerPath: runOptions.os === 'Windows' ? 'C:\\.nuget\\packages' : '/root/.nuget/packages',
-                permissions: 'ro,z'
+                permissions: 'ro'
             };
 
             const nugetUserVolume: DockerContainerVolume = {
                 localPath: nugetRootVolume.localPath, // Same local path as the root one
                 containerPath: runOptions.os === 'Windows' ? 'C:\\Users\\ContainerUser\\.nuget\\packages' : '/home/appuser/.nuget/packages',
-                permissions: 'ro,z'
+                permissions: 'ro'
+            };
+
+            const nugetDefaultUserVolume: DockerContainerVolume = {
+                localPath: nugetRootVolume.localPath, // Same local path as the root one
+                containerPath: runOptions.os === 'Windows' ? 'C:\\Users\\ContainerUser\\.nuget\\packages' : '/home/app/.nuget/packages',
+                permissions: 'ro'
             };
 
             addVolumeWithoutConflicts(volumes, appVolume);
             addVolumeWithoutConflicts(volumes, srcVolume);
             addVolumeWithoutConflicts(volumes, debuggerVolume);
-            addVolumeWithoutConflicts(volumes, nugetRootVolume);
-            addVolumeWithoutConflicts(volumes, nugetUserVolume);
+            if (await fse.pathExists(nugetRootVolume.localPath)) {
+                addVolumeWithoutConflicts(volumes, nugetRootVolume);
+            }
+            if (await fse.pathExists(nugetUserVolume.localPath)) {
+                addVolumeWithoutConflicts(volumes, nugetUserVolume);
+            }
+            if (await fse.pathExists(nugetDefaultUserVolume.localPath)) {
+                addVolumeWithoutConflicts(volumes, nugetDefaultUserVolume);
+            }
         }
 
         if (userSecrets || ssl) {
             // Try to get a container username from the image (best effort only)
             let userName: string | undefined;
             try {
-                const imageInspection = await ext.dockerClient.inspectImage(undefined, runOptions.image);
-                userName = imageInspection?.Config?.User;
+                const imageInspection = (await ext.runWithDefaults(client =>
+                    client.inspectImages({ imageRefs: [runOptions.image] })
+                ))?.[0];
+                userName = imageInspection?.user;
             } catch {
                 // Best effort
             }
@@ -254,7 +278,7 @@ export class NetCoreTaskHelper implements TaskHelper {
             const userSecretsVolume: DockerContainerVolume = {
                 localPath: hostSecretsFolders.hostUserSecretsFolder,
                 containerPath: containerSecretsFolders.containerUserSecretsFolder,
-                permissions: 'ro,z'
+                permissions: 'ro'
             };
 
             addVolumeWithoutConflicts(volumes, userSecretsVolume);
@@ -263,7 +287,7 @@ export class NetCoreTaskHelper implements TaskHelper {
                 const certVolume: DockerContainerVolume = {
                     localPath: hostSecretsFolders.hostCertificateFolder,
                     containerPath: containerSecretsFolders.containerCertificateFolder,
-                    permissions: 'ro,z'
+                    permissions: 'ro'
                 };
 
                 addVolumeWithoutConflicts(volumes, certVolume);

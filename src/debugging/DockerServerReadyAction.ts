@@ -7,11 +7,12 @@
 // Adapted from: https://github.com/microsoft/vscode/blob/8827cf5a607b6ab7abf45817604bc21883314db7/extensions/debug-server-ready/src/extension.ts
 //
 
+import { callWithTelemetryAndErrorHandling, IActionContext } from '@microsoft/vscode-azext-utils';
+import * as readline from 'readline';
+import * as stream from 'stream';
 import * as util from 'util';
 import * as vscode from 'vscode';
-import { callWithTelemetryAndErrorHandling, IActionContext } from 'vscode-azureextensionui';
 import { ext } from '../extensionVariables';
-import { localize } from '../localize';
 import { ResolvedDebugConfiguration } from './DebugHelper';
 
 const PATTERN = 'listening on.* (https?://\\S+|[0-9]+)'; // matches "listening on port 3000" or "Now listening on: https://localhost:5001"
@@ -51,7 +52,7 @@ class ServerReadyDetector implements DockerServerReadyDetector {
         const format = args.uriFormat || URI_FORMAT;
 
         if (!args || !args.containerName) {
-            throw new Error(localize('vscode-docker.debug.serverReady.noContainer', 'No container name was resolved or provided to DockerServerReadyAction.'));
+            throw new Error(vscode.l10n.t('No container name was resolved or provided to DockerServerReadyAction.'));
         }
 
         await callWithTelemetryAndErrorHandling('dockerServerReadyAction.serverReadyDetector.openExternalWithString', async (context: IActionContext) => {
@@ -64,7 +65,7 @@ class ServerReadyDetector implements DockerServerReadyDetector {
                 // nothing captured by reg exp -> use the uriFormat as the target url without substitution
                 // verify that format does not contain '%s'
                 if (format.indexOf('%s') >= 0) {
-                    const errMsg = localize('vscode-docker.debug.serverReady.noCapture', 'Format uri (\'{0}\') uses a substitution placeholder but pattern did not capture anything.', format);
+                    const errMsg = vscode.l10n.t('Format uri (\'{0}\') uses a substitution placeholder but pattern did not capture anything.', format);
                     void vscode.window.showErrorMessage(errMsg, { modal: true });
                     return;
                 }
@@ -74,36 +75,26 @@ class ServerReadyDetector implements DockerServerReadyDetector {
                 // verify that format only contains a single '%s'
                 const s = format.split('%s');
                 if (s.length !== 2) {
-                    const errMsg = localize('vscode-docker.debug.serverReady.oneSubstitution', 'Format uri (\'{0}\') must contain exactly one substitution placeholder.', format);
+                    const errMsg = vscode.l10n.t('Format uri (\'{0}\') must contain exactly one substitution placeholder.', format);
                     void vscode.window.showErrorMessage(errMsg, { modal: true });
                     return;
                 }
 
                 const containerPort = Number.parseInt(captureString, 10);
-                const containerInspectInfo = await ext.dockerClient.inspectContainer(context, args.containerName);
-                const hostPort = containerInspectInfo.NetworkSettings.Ports[`${containerPort}/tcp`][0].HostPort;
-
-                if (!hostPort) {
-                    throw new Error(localize('vscode-docker.debug.serverReady.noHostPortA', 'Could not determine host port mapped to container port {0} in container \'{1}\'.', containerPort, args.containerName));
-                }
+                const hostPort = await this.getHostPortForContainerPort(args.containerName, containerPort);
 
                 captureString = util.format(format, hostPort);
             } else {
                 const containerPort = this.getContainerPort(captureString);
 
                 if (containerPort === undefined) {
-                    const errMsg = localize('vscode-docker.debug.serverReady.noCapturedPort', 'Captured string (\'{0}\') must contain a port number.', captureString);
+                    const errMsg = vscode.l10n.t('Captured string (\'{0}\') must contain a port number.', captureString);
                     void vscode.window.showErrorMessage(errMsg, { modal: true });
                     return;
                 }
 
                 const containerProtocol = this.getContainerProtocol(captureString);
-                const containerInspectInfo = await ext.dockerClient.inspectContainer(context, args.containerName);
-                const hostPort = containerInspectInfo.NetworkSettings.Ports[`${containerPort}/tcp`][0].HostPort;
-
-                if (!hostPort) {
-                    throw new Error(localize('vscode-docker.debug.serverReady.noHostPortB', 'Could not determine host port mapped to container port {0} in container \'{1}\'.', containerPort, args.containerName));
-                }
+                const hostPort = await this.getHostPortForContainerPort(args.containerName, containerPort);
 
                 const s = format.split('%s');
 
@@ -114,7 +105,7 @@ class ServerReadyDetector implements DockerServerReadyDetector {
                     // There are exactly two substitutions (which is expected)...
                     captureString = util.format(format, containerProtocol, hostPort);
                 } else {
-                    const errMsg = localize('vscode-docker.debug.serverReady.twoSubstitutions', 'Format uri (\'{0}\') must contain exactly two substitution placeholders.', format);
+                    const errMsg = vscode.l10n.t('Format uri (\'{0}\') must contain exactly two substitution placeholders.', format);
                     void vscode.window.showErrorMessage(errMsg, { modal: true });
                     return;
                 }
@@ -141,6 +132,19 @@ class ServerReadyDetector implements DockerServerReadyDetector {
         return undefined;
     }
 
+    private async getHostPortForContainerPort(containerName: string, containerPort: number): Promise<number> {
+        const containerInspectInfo = (await ext.runWithDefaults(client =>
+            client.inspectContainers({ containers: [containerName] })
+        ))?.[0];
+        const hostPort = containerInspectInfo?.ports.find(p => p.containerPort === containerPort)?.hostPort;
+
+        if (!hostPort) {
+            throw new Error(vscode.l10n.t('Could not determine host port mapped to container port {0} in container \'{1}\'.', containerPort, containerName));
+        }
+
+        return hostPort;
+    }
+
     private openExternalWithUri(session: vscode.DebugSession, uri: string): void {
 
         const configuration = <ResolvedDebugConfiguration>session.configuration;
@@ -162,7 +166,7 @@ class ServerReadyDetector implements DockerServerReadyDetector {
                             webRoot: args.webRoot || WEB_ROOT
                         });
                 } else {
-                    const errMsg = localize('vscode-docker.debug.serverReady.noChrome', 'The action \'debugWithChrome\' requires the \'Debugger for Chrome\' extension.');
+                    const errMsg = vscode.l10n.t('The action \'debugWithChrome\' requires the \'Debugger for Chrome\' extension.');
                     void vscode.window.showErrorMessage(errMsg, { modal: true });
                 }
                 break;
@@ -185,40 +189,44 @@ interface DockerServerReadyDetector {
     detectPattern(output: string): void;
 }
 
-type LogStream = NodeJS.ReadableStream & { destroy(): void; };
-
 class DockerLogsTracker extends vscode.Disposable {
-    private logStream: LogStream;
+    private readonly cts = new vscode.CancellationTokenSource();
+    private lineReader: readline.Interface | undefined;
 
     public constructor(private readonly containerName: string, private readonly detector: DockerServerReadyDetector) {
         super(
             () => {
-                if (this.logStream) {
-                    this.logStream.destroy();
-                }
+                this.cts.cancel();
+                this.lineReader?.close();
             });
 
         if (!this.detector) {
             return;
         }
 
-        // eslint-disable-next-line @typescript-eslint/no-floating-promises
-        this.startListening();
+        // Don't wait
+        void this.listen();
     }
 
-    private async startListening(): Promise<void> {
-        return callWithTelemetryAndErrorHandling('dockerServerReadyAction.dockerLogsTracker.startListening', async (context: IActionContext) => {
-            // Don't actually telemetrize or show anything (same as prior behavior), but wrap call to get an IActionContext
-            context.telemetry.suppressAll = true;
-            context.errorHandling.suppressDisplay = true;
-            context.errorHandling.rethrow = false;
+    private async listen(): Promise<void> {
+        try {
+            const generator = ext.streamWithDefaults(
+                client => client.logsForContainer({ container: this.containerName, follow: true }),
+                {
+                    cancellationToken: this.cts.token,
+                }
+            );
 
-            this.logStream = await ext.dockerClient.getContainerLogs(context, this.containerName) as LogStream;
-
-            this.logStream.on('data', (data) => {
-                this.detector.detectPattern(data.toString());
-            });
-        });
+            this.lineReader = readline.createInterface({ input: stream.Readable.from(generator) });
+            for await (const line of this.lineReader) {
+                this.detector.detectPattern(line);
+            }
+        } catch {
+            // Do nothing
+            // The usual termination pathway is cancellation through the CTS above, so errors are expected
+            // TODO: for unknown reasons, the cancellation error does not actually get thrown to here, and ends
+            // up in the extension host output log. Ideally this should not happen.
+        }
     }
 }
 

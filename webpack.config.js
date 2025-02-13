@@ -10,7 +10,6 @@
 
 /* eslint-disable @typescript-eslint/no-var-requires */
 const path = require('path');
-const fse = require('fs-extra');
 const CopyPlugin = require('copy-webpack-plugin');
 const TerserPlugin = require('terser-webpack-plugin');
 const BundleAnalyzerPlugin = require('webpack-bundle-analyzer').BundleAnalyzerPlugin;
@@ -25,9 +24,11 @@ const config = {
     cache: true, // Makes 'watch' builds way faster after the first full build
 
     entry: {
+        /* eslint-disable @typescript-eslint/naming-convention */
         './extension.bundle': './src/extension.ts',
         './dockerfile-language-server-nodejs/lib/server': './node_modules/dockerfile-language-server-nodejs/lib/server.js',
         './compose-language-service/lib/server': './node_modules/@microsoft/compose-language-service/lib/server.js',
+        /* eslint-enable @typescript-eslint/naming-convention */
     }, // the entry point of this extension, 📖 -> https://webpack.js.org/configuration/entry-context/
     output: {
         // the bundle is stored in the 'dist' folder (check package.json), 📖 -> https://webpack.js.org/configuration/output/
@@ -68,21 +69,11 @@ const config = {
     },
     plugins: [
         // Copy some needed resource files from external sources
-        // @ts-expect-error: Spurious type incompatibility error
         new CopyPlugin({
             patterns: [
-                './node_modules/vscode-azureextensionui/resources/**/*.svg',
-                './node_modules/open/xdg-open*', // This script isn't included in the webpack but is needed by `open` on certain systems, so copy it in
+                './node_modules/@microsoft/vscode-azext-azureutils/resources/**/*.svg',
             ],
         }),
-        {
-            // Webpack does not preserve the execute permission on the above xdg-open script, so apply it again within the bundle
-            apply: (compiler) => {
-                compiler.hooks.afterEmit.tapPromise('AzCodeCopyWorkaround', async () => {
-                    await fse.chmod('./dist/node_modules/open/xdg-open', '755');
-                });
-            },
-        },
     ],
     optimization: {
         minimizer: [
@@ -105,8 +96,8 @@ const config = {
             message: /require\.extensions/,
         },
         {
-            // Ignore a warning from `vscode-extension-telemetry`
-            module: /node_modules\/vscode-extension-telemetry/,
+            // Ignore a warning from `@vscode/extension-telemetry`
+            module: /node_modules\/@vscode\/extension-telemetry/,
             message: /Can't resolve 'applicationinsights-native-metrics'/
         },
         {
@@ -114,12 +105,27 @@ const config = {
             module: /node_modules\/ssh2/,
             message: /Can't resolve 'cpu-features'/
         },
+        {
+            // Ignore another warning for missing optional dependency of `ssh2`, if VS build tools aren't installed
+            module: /node_modules\/ssh2/,
+            message: /Can't resolve '.\/crypto\/build\/Release\/sshcrypto.node'/
+        },
+        {
+            // Ignore a warning for a missing optional dependency of `ws` via `@microsoft/vscode-azext-azureappservice`
+            module: /node_modules\/ws/,
+            message: /Can't resolve 'bufferutil'/
+        },
+        {
+            // Ignore another warning for a missing optional dependency of `ws` via `@microsoft/vscode-azext-azureappservice`
+            module: /node_modules\/ws/,
+            message: /Can't resolve 'utf-8-validate'/
+        },
         (warning) => false, // No other warnings should be ignored
     ],
 };
 
 if (debugWebpack) {
-    // @ts-expect-error: Spurious type incompatibility error
+    // @ts-expect-error for a spurious type incompatibility
     config.plugins.push(new BundleAnalyzerPlugin({ analyzerMode: 'static' }));
     console.log('Config:', config);
 }
